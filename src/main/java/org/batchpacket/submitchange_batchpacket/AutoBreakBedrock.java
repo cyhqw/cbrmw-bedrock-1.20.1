@@ -41,6 +41,8 @@ import org.batchpacket.submitchange_batchpacket.ModConfig;
 public class AutoBreakBedrock {
     private static final int AREA_SCAN_HORIZONTAL_RADIUS = 4;
     private static final int AREA_SCAN_VERTICAL_RADIUS = 4;
+    private static final int TARGET_SCAN_HORIZONTAL_RADIUS = 8;
+    private static final int TARGET_SCAN_VERTICAL_RADIUS = 8;
     private static final int PASSIVE_SCAN_INTERVAL_TICKS = 2;
     private static final double RECYCLE_INTERACT_RANGE_SQR = 64.0;
     private static final int RECYCLE_RETRY_INTERVAL_TICKS = 2;
@@ -60,6 +62,7 @@ public class AutoBreakBedrock {
     private static final int TASK_STALL_RESET_TICKS = 5;
     private static boolean isLeftKeyPressed = false;
     private static final Map<BlockPos, BedrockCheckTask> bedrockTasks = new HashMap<BlockPos, BedrockCheckTask>();
+    private static final Map<BlockPos, BedrockCheckTask> pistonReservations = new HashMap<BlockPos, BedrockCheckTask>();
     private static final LinkedHashSet<BlockPos> pendingAreaTargets = new LinkedHashSet();
     private static int areaScanTickCounter = 0;
     private static int passiveScanTickCounter = 0;
@@ -264,6 +267,7 @@ public class AutoBreakBedrock {
             recycleTasks.remove(task.pos);
             pendingRecyclePistons.remove(task.pos);
             pistonAPlacedTick.remove(task.pos);
+            pistonReservations.remove(task.pos);
         }
     }
 
@@ -277,6 +281,7 @@ public class AutoBreakBedrock {
         }
         BlockState state = mc.level.getBlockState(task.pos);
         if (state.getBlock() == Blocks.PISTON) {
+            task.observedPiston = true;
             task.manualRetry = false;
             task.removalAttemptAccepted = false;
             task.removalConfirmTicks = 0;
@@ -284,6 +289,13 @@ public class AutoBreakBedrock {
         }
         if (task.manualRetry) {
             AutoBreakBedrock.refreshClientBlock(mc, task.pos);
+            if (task.observedPiston && AutoBreakBedrock.findWrenchInHotbar((Player)mc.player) != -1) {
+                task.manualRetry = false;
+                task.attempts = 0;
+                task.nonPistonTicks = 0;
+                task.cooldownTicks = 0;
+                return AutoBreakBedrock.advanceRecycleTaskWhenNonPiston(mc, task);
+            }
             task.cooldownTicks = RECYCLE_NON_PISTON_CONFIRM_TICKS;
             return false;
         }
@@ -349,8 +361,23 @@ public class AutoBreakBedrock {
             return false;
         }
         // Keep an unresolved position for a later client state update.
-        task.manualRetry = true;
+        if (!task.manualRetry) {
+            task.manualRetry = true;
+            if (!task.warningShown) {
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u56de\u6536\u5931\u8d25\uff0c\u5df2\u6682\u505c\u65b0\u4efb\u52a1");
+                task.warningShown = true;
+            }
+        }
         task.cooldownTicks = RECYCLE_NON_PISTON_CONFIRM_TICKS;
+        return false;
+    }
+
+    private static boolean hasBlockedRecycleTask() {
+        for (RecycleTask task : recycleTasks.values()) {
+            if (task.manualRetry) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -401,6 +428,7 @@ public class AutoBreakBedrock {
         // Coordinates from another level or player must never be reused.
         AreaSelectionManager.INSTANCE.clearSelection();
         bedrockTasks.clear();
+        pistonReservations.clear();
         pendingAreaTargets.clear();
         recycleTasks.clear();
         pendingRecyclePistons.clear();
@@ -420,7 +448,9 @@ public class AutoBreakBedrock {
 
     private static boolean isWithinPlayerAreaWindow(Player player, BlockPos pos) {
         BlockPos playerPos = player.blockPosition();
-        return Math.abs(pos.getX() - playerPos.getX()) <= 4 && Math.abs(pos.getY() - playerPos.getY()) <= 4 && Math.abs(pos.getZ() - playerPos.getZ()) <= 4;
+        return Math.abs(pos.getX() - playerPos.getX()) <= TARGET_SCAN_HORIZONTAL_RADIUS
+            && Math.abs(pos.getY() - playerPos.getY()) <= TARGET_SCAN_VERTICAL_RADIUS
+            && Math.abs(pos.getZ() - playerPos.getZ()) <= TARGET_SCAN_HORIZONTAL_RADIUS;
     }
 
     private static int getProcessingSpeed() {
@@ -434,7 +464,7 @@ public class AutoBreakBedrock {
 
     private static int getDynamicMaxActiveBreakTasks() {
         int speed = AutoBreakBedrock.getProcessingSpeed();
-        return Math.max(2, speed * 2);
+        return Math.max(1, Math.min(8, 1 + speed / 15));
     }
 
     private static int getDynamicNewTasksPerAreaScan() {
@@ -539,6 +569,9 @@ public class AutoBreakBedrock {
             return;
         }
         areaModeSelectionHintShown = false;
+        if (AutoBreakBedrock.hasBlockedRecycleTask()) {
+            return;
+        }
         if (++areaScanTickCounter < AutoBreakBedrock.getDynamicAreaScanIntervalTicks()) {
             return;
         }
@@ -577,9 +610,9 @@ public class AutoBreakBedrock {
         }
         pendingAreaTargets.clear();
         BlockPos playerPos = mc.player.blockPosition();
-        for (int dy = -AREA_SCAN_VERTICAL_RADIUS; dy <= AREA_SCAN_VERTICAL_RADIUS; ++dy) {
-            for (int dx = -AREA_SCAN_HORIZONTAL_RADIUS; dx <= AREA_SCAN_HORIZONTAL_RADIUS; ++dx) {
-                for (int dz = -AREA_SCAN_HORIZONTAL_RADIUS; dz <= AREA_SCAN_HORIZONTAL_RADIUS; ++dz) {
+        for (int dy = -TARGET_SCAN_VERTICAL_RADIUS; dy <= TARGET_SCAN_VERTICAL_RADIUS; ++dy) {
+            for (int dx = -TARGET_SCAN_HORIZONTAL_RADIUS; dx <= TARGET_SCAN_HORIZONTAL_RADIUS; ++dx) {
+                for (int dz = -TARGET_SCAN_HORIZONTAL_RADIUS; dz <= TARGET_SCAN_HORIZONTAL_RADIUS; ++dz) {
                     BlockPos targetPos = playerPos.offset(dx, dy, dz);
                     if (!selectionManager.isWithinSelection(targetPos)) {
                         continue;
@@ -641,12 +674,12 @@ public class AutoBreakBedrock {
             return false;
         }
         BlockPos playerPos = mc.player.blockPosition();
-        int minX = Math.max(Math.min(start.getX(), end.getX()), playerPos.getX() - 4);
-        int minY = Math.max(Math.min(start.getY(), end.getY()), playerPos.getY() - 4);
-        int minZ = Math.max(Math.min(start.getZ(), end.getZ()), playerPos.getZ() - 4);
-        int maxX = Math.min(Math.max(start.getX(), end.getX()), playerPos.getX() + 4);
-        int maxY = Math.min(Math.max(start.getY(), end.getY()), playerPos.getY() + 4);
-        int maxZ = Math.min(Math.max(start.getZ(), end.getZ()), playerPos.getZ() + 4);
+        int minX = Math.max(Math.min(start.getX(), end.getX()), playerPos.getX() - TARGET_SCAN_HORIZONTAL_RADIUS);
+        int minY = Math.max(Math.min(start.getY(), end.getY()), playerPos.getY() - TARGET_SCAN_VERTICAL_RADIUS);
+        int minZ = Math.max(Math.min(start.getZ(), end.getZ()), playerPos.getZ() - TARGET_SCAN_HORIZONTAL_RADIUS);
+        int maxX = Math.min(Math.max(start.getX(), end.getX()), playerPos.getX() + TARGET_SCAN_HORIZONTAL_RADIUS);
+        int maxY = Math.min(Math.max(start.getY(), end.getY()), playerPos.getY() + TARGET_SCAN_VERTICAL_RADIUS);
+        int maxZ = Math.min(Math.max(start.getZ(), end.getZ()), playerPos.getZ() + TARGET_SCAN_HORIZONTAL_RADIUS);
         for (int y = minY; y <= maxY; ++y) {
             for (int x = minX; x <= maxX; ++x) {
                 for (int z = minZ; z <= maxZ; ++z) {
@@ -730,7 +763,32 @@ public class AutoBreakBedrock {
         return isSurfaceExposed(mc, pos);
     }
 
+    private static boolean reservePistonPosition(Minecraft mc, BlockPos pos, BedrockCheckTask task) {
+        BedrockCheckTask owner = pistonReservations.get(pos);
+        if (owner != null && owner != task) {
+            return false;
+        }
+        BlockState state = mc.level.getBlockState(pos);
+        if (!state.isAir() && !state.canBeReplaced()) {
+            return false;
+        }
+        pistonReservations.put(pos, task);
+        return true;
+    }
+
+    private static void releasePistonPosition(BlockPos pos, BedrockCheckTask task) {
+        if (pistonReservations.get(pos) == task) {
+            pistonReservations.remove(pos);
+        }
+    }
+
     private static boolean tryCreateBreakTask(Minecraft mc, BlockPos targetPos, BlockState targetState, boolean notifyWhenNoSpace, boolean areaTask) {
+        if (AutoBreakBedrock.hasBlockedRecycleTask()) {
+            if (notifyWhenNoSpace) {
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8bf7\u5148\u56de\u6536\u5df2\u653e\u7f6e\u7684\u6d3b\u585e");
+            }
+            return false;
+        }
         ArrayList<AWithB> validAList = new ArrayList<AWithB>();
         for (Direction dir : Direction.values()) {
             BlockPos pistonAPos = targetPos.relative(dir);
@@ -762,7 +820,6 @@ public class AutoBreakBedrock {
 
     private static boolean placePistonA(Minecraft mc, BlockPos pos, BlockPos bedrockPos) {
         boolean accepted;
-        AutoBreakBedrock.registerPlacedPiston(pos, true);
         Direction facing = Direction.getNearest((float)(bedrockPos.getX() - pos.getX()), (float)(bedrockPos.getY() - pos.getY()), (float)(bedrockPos.getZ() - pos.getZ()));
         int pistonSlot = AutoBreakBedrock.findPistonInHotbar((Player)mc.player);
         if (pistonSlot == -1) {
@@ -774,6 +831,7 @@ public class AutoBreakBedrock {
         if (!accepted) {
             return false;
         }
+        AutoBreakBedrock.registerPlacedPiston(pos, true);
         AutoBreakBedrock.refreshClientBlock(mc, pos);
         BlockState pistonState = (BlockState)((BlockState)Blocks.PISTON.defaultBlockState().setValue((Property)BlockStateProperties.FACING, (Comparable)facing)).setValue((Property)BlockStateProperties.EXTENDED, (Comparable)Boolean.valueOf(true));
         RadialWrenchMenuSubmitPacket packet = new RadialWrenchMenuSubmitPacket(pos, pistonState);
@@ -783,7 +841,6 @@ public class AutoBreakBedrock {
 
     private static boolean placePistonB(Minecraft mc, BlockPos pos) {
         boolean accepted;
-        AutoBreakBedrock.registerPlacedPiston(pos, false);
         int pistonSlot = AutoBreakBedrock.findPistonInHotbar((Player)mc.player);
         if (pistonSlot == -1) {
             return false;
@@ -792,6 +849,7 @@ public class AutoBreakBedrock {
         BlockState state = mc.level.getBlockState(pos);
         boolean bl = accepted = state.getBlock() == Blocks.PISTON || placeResult.consumesAction();
         if (accepted) {
+            AutoBreakBedrock.registerPlacedPiston(pos, false);
             AutoBreakBedrock.refreshClientBlock(mc, pos);
         }
         return accepted;
@@ -904,8 +962,10 @@ public class AutoBreakBedrock {
         public int cooldownTicks = 0;
         public int nonPistonTicks = 0;
         public int removalConfirmTicks = 0;
+        public boolean observedPiston = false;
         public boolean removalAttemptAccepted = false;
         public boolean manualRetry = false;
+        public boolean warningShown = false;
 
         public RecycleTask(BlockPos pos) {
             this.pos = pos;
@@ -918,7 +978,6 @@ public class AutoBreakBedrock {
         private final List<AWithB> validAList;
         private final boolean areaTask;
         private final Set<BlockPos> placedPistons = new HashSet<BlockPos>();
-        private final Set<BlockPos> attemptedPistonPositions = new HashSet<BlockPos>();
         private int tickCount = 0;
         private boolean pistonsPlaced = false;
         private boolean checkingBedrock = false;
@@ -986,29 +1045,41 @@ public class AutoBreakBedrock {
 
         private boolean advancePlacementPhase(Minecraft mc) {
             if (this.waitingRecycleBeforeNextA && this.pendingFailedAPos != null) {
+                if (recycleTasks.containsKey(this.pendingFailedAPos)) {
+                    return false;
+                }
                 return this.advanceWaitingFailedARecycle(mc);
             }
-            if (this.tryAIndex >= this.validAList.size()) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u653e\u7f6e\u5931\u8d25");
-                this.breakingPistons = true;
-                this.pistonsPlaced = true;
-                return false;
+            if (this.placedAPos == null) {
+                if (this.tryAIndex >= this.validAList.size()) {
+                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u653e\u7f6e\u5931\u8d25");
+                    this.breakingPistons = true;
+                    this.pistonsPlaced = true;
+                    return false;
+                }
+                AWithB ab = this.validAList.get(this.tryAIndex);
+                if (!AutoBreakBedrock.reservePistonPosition(mc, ab.aPos, this)) {
+                    ++this.tryAIndex;
+                    this.tryBIndex = 0;
+                    this.touchProgress();
+                    return false;
+                }
+                if (!AutoBreakBedrock.consumeOperationBudget()) {
+                    AutoBreakBedrock.releasePistonPosition(ab.aPos, this);
+                    return false;
+                }
+                if (!AutoBreakBedrock.placePistonA(mc, ab.aPos, this.targetPos)) {
+                    AutoBreakBedrock.releasePistonPosition(ab.aPos, this);
+                    ++this.tryAIndex;
+                    this.tryBIndex = 0;
+                    this.touchProgress();
+                    return false;
+                }
+                this.placedPistons.add(ab.aPos);
+                this.placedAPos = ab.aPos;
+                this.touchProgress();
             }
             AWithB ab = this.validAList.get(this.tryAIndex);
-            this.attemptedPistonPositions.add(ab.aPos);
-            AutoBreakBedrock.registerPlacedPiston(ab.aPos, true);
-            if (!AutoBreakBedrock.consumeOperationBudget()) {
-                return false;
-            }
-            if (!AutoBreakBedrock.placePistonA(mc, ab.aPos, this.targetPos)) {
-                ++this.tryAIndex;
-                this.tryBIndex = 0;
-                this.touchProgress();
-                return false;
-            }
-            this.placedPistons.add(ab.aPos);
-            this.placedAPos = ab.aPos;
-            this.touchProgress();
             if (this.tryBIndex >= ab.bList.size()) {
                 AutoBreakBedrock.enqueueRecycle(ab.aPos);
                 this.waitingRecycleBeforeNextA = true;
@@ -1021,9 +1092,13 @@ public class AutoBreakBedrock {
                 this.enqueueAllRecycleCandidates();
                 return true;
             }
-            this.attemptedPistonPositions.add(bPos);
-            AutoBreakBedrock.registerPlacedPiston(bPos, false);
+            if (!AutoBreakBedrock.reservePistonPosition(mc, bPos, this)) {
+                ++this.tryBIndex;
+                this.touchProgress();
+                return false;
+            }
             if (!AutoBreakBedrock.consumeOperationBudget()) {
+                AutoBreakBedrock.releasePistonPosition(bPos, this);
                 return false;
             }
             if (AutoBreakBedrock.placePistonB(mc, bPos)) {
@@ -1036,6 +1111,7 @@ public class AutoBreakBedrock {
                 this.touchProgress();
                 return false;
             }
+            AutoBreakBedrock.releasePistonPosition(bPos, this);
             ++this.tryBIndex;
             this.touchProgress();
             return false;
@@ -1071,9 +1147,6 @@ public class AutoBreakBedrock {
         }
 
         private void enqueueRemainingRecycleCandidates() {
-            for (BlockPos pos : this.attemptedPistonPositions) {
-                AutoBreakBedrock.enqueueRecycle(pos);
-            }
             for (BlockPos pos : this.placedPistons) {
                 AutoBreakBedrock.enqueueRecycle(pos);
             }
@@ -1145,7 +1218,6 @@ public class AutoBreakBedrock {
             this.placedAPos = null;
             this.placedBPos = null;
             this.placedPistons.clear();
-            this.attemptedPistonPositions.clear();
         }
 
         private void touchProgress() {
