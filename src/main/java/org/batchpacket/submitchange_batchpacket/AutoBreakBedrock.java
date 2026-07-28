@@ -47,7 +47,7 @@ public class AutoBreakBedrock {
     private static final int PASSIVE_SCAN_INTERVAL_TICKS = 1;
     private static final double RECYCLE_INTERACT_RANGE_SQR = 64.0;
     private static final int RECYCLE_RETRY_INTERVAL_TICKS = 1;
-    private static final int GHOST_PROBE_INTERVAL_TICKS = 1;
+    private static final int GHOST_PROBE_INTERVAL_TICKS = 5;
     private static final int MAX_GHOST_PROBE_ATTEMPTS = 8;
     private static final int RECYCLE_NON_PISTON_CONFIRM_TICKS = 10;
     private static final int RECYCLE_CONFIRMATION_TICKS = 2;
@@ -86,6 +86,7 @@ public class AutoBreakBedrock {
     private static Object activeClientLevel;
     private static Player activeClientPlayer;
     private static final Map<BlockPos, RecycleTask> recycleTasks = new HashMap<BlockPos, RecycleTask>();
+    private static final Map<BlockPos, BlockState> pendingWrenchActions = new HashMap<BlockPos, BlockState>();
 
     private static void registerPlacedPiston(BlockPos pos, boolean isPistonA) {
         pendingRecyclePistons.add(pos);
@@ -98,6 +99,8 @@ public class AutoBreakBedrock {
 
     private static void enqueueRecycle(BlockPos pos) {
         pendingRecyclePistons.add(pos);
+        pistonReservations.remove(pos);
+        pendingWrenchActions.remove(pos);
         recycleTasks.computeIfAbsent(pos, RecycleTask::new);
     }
 
@@ -207,6 +210,7 @@ public class AutoBreakBedrock {
         AutoBreakBedrock.probeGhostAirTransitionsNearSelection(mc);
         AutoBreakBedrock.recyclePendingPistons(mc);
         AutoBreakBedrock.processAreaBedrockMode(mc);
+        AutoBreakBedrock.processPendingWrenchActions(mc);
         AutoBreakBedrock.processBedrockTasks(mc);
         AutoBreakBedrock.processRecycleTasks(mc);
     }
@@ -266,9 +270,27 @@ public class AutoBreakBedrock {
                         continue;
                     }
                     if (!nearbyObservedNonAirAroundSelection.remove(pos2)) continue;
+                    if (AutoBreakBedrock.isPositionConflicting(pos2) || bedrockTasks.containsKey(pos2)) continue;
                     AutoBreakBedrock.rightClickWithWrenchOnce(mc, pos2);
                 }
             }
+        }
+    }
+
+    private static void processPendingWrenchActions(Minecraft mc) {
+        if (pendingWrenchActions.isEmpty() || mc.level == null) {
+            return;
+        }
+        Iterator<Map.Entry<BlockPos, BlockState>> iterator = pendingWrenchActions.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<BlockPos, BlockState> entry = iterator.next();
+            BlockPos pos = entry.getKey();
+            if (AutoBreakBedrock.getPistonAAgeTicks(pos) < 1) {
+                continue;
+            }
+            RadialWrenchMenuSubmitPacket packet = new RadialWrenchMenuSubmitPacket(pos, entry.getValue());
+            AllPackets.getChannel().sendToServer(packet);
+            iterator.remove();
         }
     }
 
@@ -399,7 +421,7 @@ public class AutoBreakBedrock {
         if (!task.manualRetry) {
             task.manualRetry = true;
             if (!task.warningShown) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u56de\u6536\u5931\u8d25\uff0c\u5df2\u6682\u505c\u65b0\u4efb\u52a1");
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u56de\u6536\u5931\u8d25\uff0c\u6b63\u5728\u91cd\u8bd5");
                 task.warningShown = true;
             }
         }
@@ -450,6 +472,7 @@ public class AutoBreakBedrock {
         passiveScanTickCounter = 0;
         ghostProbeTickCounter = 0;
         noBreakTargetHintShown = false;
+        pendingWrenchActions.clear();
     }
 
     private static void clearBedrockTasksAndQueueRecycling() {
@@ -468,6 +491,7 @@ public class AutoBreakBedrock {
         recycleTasks.clear();
         pendingRecyclePistons.clear();
         pistonAPlacedTick.clear();
+        pendingWrenchActions.clear();
         nearbyObservedNonPiston.clear();
         nearbyObservedNonAirAroundSelection.clear();
         areaScanTickCounter = 0;
@@ -625,9 +649,6 @@ public class AutoBreakBedrock {
             return;
         }
         areaModeSelectionHintShown = false;
-        if (AutoBreakBedrock.hasBlockedRecycleTask()) {
-            return;
-        }
         if (++areaScanTickCounter < AutoBreakBedrock.getDynamicAreaScanIntervalTicks()) {
             return;
         }
@@ -857,17 +878,18 @@ public class AutoBreakBedrock {
         }
     }
 
+    private static boolean isPositionConflicting(BlockPos pos) {
+        return pistonReservations.containsKey(pos)
+            || pendingRecyclePistons.contains(pos)
+            || recycleTasks.containsKey(pos);
+    }
+
     private static boolean tryCreateBreakTask(Minecraft mc, BlockPos targetPos, BlockState targetState, boolean notifyWhenNoSpace, boolean areaTask) {
-        if (AutoBreakBedrock.hasBlockedRecycleTask()) {
-            if (notifyWhenNoSpace) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8bf7\u5148\u56de\u6536\u5df2\u653e\u7f6e\u7684\u6d3b\u585e");
-            }
-            return false;
-        }
         ArrayList<AWithB> validAList = new ArrayList<AWithB>();
         for (Direction dir : Direction.values()) {
             BlockPos pistonAPos = targetPos.relative(dir);
             if (!AutoBreakBedrock.isWithinBuildHeight(mc, pistonAPos)) continue;
+            if (AutoBreakBedrock.isPositionConflicting(pistonAPos)) continue;
             BlockState pistonAState = mc.level.getBlockState(pistonAPos);
             if (!AutoBreakBedrock.isPistonPlacementSpace(pistonAState)) continue;
             ArrayList<BlockPos> bList = new ArrayList<BlockPos>();
@@ -875,7 +897,8 @@ public class AutoBreakBedrock {
                 BlockState bState;
                 BlockPos bPos = pistonAPos.relative(bDir);
                 if (!AutoBreakBedrock.isWithinBuildHeight(mc, bPos)) continue;
-                if (bPos.equals((Object)targetPos) || !AutoBreakBedrock.isPistonPlacementSpace(bState = mc.level.getBlockState(bPos))) continue;
+                if (bPos.equals((Object)targetPos) || AutoBreakBedrock.isPositionConflicting(bPos)) continue;
+                if (!AutoBreakBedrock.isPistonPlacementSpace(bState = mc.level.getBlockState(bPos))) continue;
                 bList.add(bPos);
             }
             if (bList.isEmpty()) continue;
@@ -908,8 +931,7 @@ public class AutoBreakBedrock {
         AutoBreakBedrock.registerPlacedPiston(pos, true);
         AutoBreakBedrock.refreshClientBlock(mc, pos);
         BlockState pistonState = (BlockState)((BlockState)Blocks.PISTON.defaultBlockState().setValue((Property)BlockStateProperties.FACING, (Comparable)facing)).setValue((Property)BlockStateProperties.EXTENDED, (Comparable)Boolean.valueOf(true));
-        RadialWrenchMenuSubmitPacket packet = new RadialWrenchMenuSubmitPacket(pos, pistonState);
-        AllPackets.getChannel().sendToServer(packet);
+        pendingWrenchActions.put(pos, pistonState);
         return true;
     }
 
@@ -930,13 +952,20 @@ public class AutoBreakBedrock {
     }
 
     private static InteractionResult breakBlockWithWrench(Minecraft mc, BlockPos pos) {
-        ServerboundPlayerCommandPacket shiftPacket = new ServerboundPlayerCommandPacket((Entity)mc.player, ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY);
-        mc.player.connection.send((Packet)shiftPacket);
+        boolean wasShiftDown = mc.player.isShiftKeyDown();
+        mc.player.setShiftKeyDown(true);
+        if (!wasShiftDown) {
+            ServerboundPlayerCommandPacket shiftPacket = new ServerboundPlayerCommandPacket((Entity)mc.player, ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY);
+            mc.player.connection.send((Packet)shiftPacket);
+        }
         BlockHitResult hitResult = new BlockHitResult(pos.getCenter(), Direction.UP, pos, false);
         InteractionResult result = mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
         AutoBreakBedrock.refreshClientBlock(mc, pos);
-        ServerboundPlayerCommandPacket releaseShiftPacket = new ServerboundPlayerCommandPacket((Entity)mc.player, ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY);
-        mc.player.connection.send((Packet)releaseShiftPacket);
+        mc.player.setShiftKeyDown(wasShiftDown);
+        if (!wasShiftDown) {
+            ServerboundPlayerCommandPacket releaseShiftPacket = new ServerboundPlayerCommandPacket((Entity)mc.player, ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY);
+            mc.player.connection.send((Packet)releaseShiftPacket);
+        }
         return result;
     }
 
