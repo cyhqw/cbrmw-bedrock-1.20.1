@@ -5,7 +5,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -24,7 +23,7 @@ public class WhitelistConfigScreen extends Screen {
     private int scrollOffset = 0;
 
     protected WhitelistConfigScreen(Screen parent) {
-        super((Component)Component.literal((String)"\u81ea\u52a8\u7834\u65b9\u5757\u767d\u540d\u5355\u914d\u7f6e"));
+        super(Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u767d\u540d\u5355\u914d\u7f6e"));
         this.parent = parent;
     }
 
@@ -32,15 +31,17 @@ public class WhitelistConfigScreen extends Screen {
         return new WhitelistConfigScreen(parent);
     }
 
+    @Override
     protected void init() {
-        this.whitelistInput = new EditBox(this.font, this.width / 2 - 100, 50, 200, 20, (Component)Component.literal((String)"\u767d\u540d\u5355\u65b9\u5757ID"));
-        this.addRenderableWidget((GuiEventListener)this.whitelistInput);
-        this.addRenderableWidget((GuiEventListener)Button.builder((Component)Component.literal((String)"\u6dfb\u52a0ID"), button -> this.addWhitelistByInput()).bounds(this.width / 2 - 100, 80, 64, 20).build());
-        this.addRenderableWidget((GuiEventListener)Button.builder((Component)Component.literal((String)"\u79fb\u9664ID"), button -> this.removeWhitelistByInput()).bounds(this.width / 2 - 32, 80, 64, 20).build());
-        this.addRenderableWidget((GuiEventListener)Button.builder((Component)Component.literal((String)"\u51c6\u661f\u52a0\u5165"), button -> this.addWhitelistByCrosshair()).bounds(this.width / 2 + 36, 80, 64, 20).build());
-        this.addRenderableWidget((GuiEventListener)Button.builder((Component)Component.literal((String)"\u8fd4\u56de"), button -> this.onClose()).bounds(this.width / 2 - 100, this.height - 30, 200, 20).build());
+        this.whitelistInput = new EditBox(this.font, this.width / 2 - 100, 50, 200, 20, Component.literal("\u767d\u540d\u5355\u65b9\u5757ID"));
+        this.addRenderableWidget(this.whitelistInput);
+        this.addRenderableWidget(Button.builder(Component.literal("\u6dfb\u52a0ID"), button -> this.addWhitelistByInput()).bounds(this.width / 2 - 100, 80, 64, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("\u79fb\u9664ID"), button -> this.removeWhitelistByInput()).bounds(this.width / 2 - 32, 80, 64, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("\u51c6\u661f\u52a0\u5165"), button -> this.addWhitelistByCrosshair()).bounds(this.width / 2 + 36, 80, 64, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("\u8fd4\u56de"), button -> this.onClose()).bounds(this.width / 2 - 100, this.height - 30, 200, 20).build());
     }
 
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         this.drawSharpCenteredString(guiGraphics, this.title.getString(), this.width / 2, 20, 0xFFFFFF);
@@ -69,18 +70,20 @@ public class WhitelistConfigScreen extends Screen {
         guiGraphics.drawString(this.font, text, x, y, color, false);
     }
 
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (scrollY > 0.0) {
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (amount > 0.0) {
             this.scrollBy(-1);
             return true;
         }
-        if (scrollY < 0.0) {
+        if (amount < 0.0) {
             this.scrollBy(1);
             return true;
         }
-        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+        return super.mouseScrolled(mouseX, mouseY, amount);
     }
 
+    @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
@@ -136,7 +139,7 @@ public class WhitelistConfigScreen extends Screen {
     }
 
     private String getLocalizedBlockName(String blockId) {
-        ResourceLocation key = ResourceLocation.tryParse((String)blockId);
+        ResourceLocation key = ResourceLocation.tryParse(blockId);
         if (key == null) {
             return blockId;
         }
@@ -173,12 +176,13 @@ public class WhitelistConfigScreen extends Screen {
         BlockState state = mc.level.getBlockState(blockHit.getBlockPos());
         Block block = state.getBlock();
         boolean changed = ModConfig.getInstance().addWhitelistBlock(block);
-        ResourceLocation key = BuiltInRegistries.BLOCK.getKey((Object)block);
+        ResourceLocation key = BuiltInRegistries.BLOCK.getKey(block);
         String blockId = key.toString();
         this.statusText = changed ? "\u5df2\u4ece\u51c6\u661f\u6dfb\u52a0: " + blockId : "\u6dfb\u52a0\u5931\u8d25(\u7a7a\u6c14\u6216\u5df2\u5b58\u5728): " + blockId;
         this.whitelistInput.setValue(blockId);
     }
 
+    @Override
     public void onClose() {
         Minecraft.getInstance().setScreen(this.parent);
     }

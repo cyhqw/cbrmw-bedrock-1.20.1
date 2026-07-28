@@ -12,7 +12,7 @@ import org.batchpacket.submitchange_batchpacket.AutoBreakBedrock;
 import org.batchpacket.submitchange_batchpacket.ConfigScreen;
 import org.batchpacket.submitchange_batchpacket.Submitchange_batchpacket;
 
-@EventBusSubscriber(value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
+@EventBusSubscriber(value = Dist.CLIENT, bus = EventBusSubscriber.Bus.FORGE)
 public class ClientEventHandler {
     @SubscribeEvent
     public static void onKeyInput(InputEvent.Key event) {
@@ -44,7 +44,7 @@ public class ClientEventHandler {
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
-        if (!event.player.level.isClientSide()) {
+        if (event.side.isServer()) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();

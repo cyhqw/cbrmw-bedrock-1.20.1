@@ -140,7 +140,7 @@ public class ModConfig {
     public List<String> getAutoBreakWhitelistIds() {
         ArrayList<String> ids = new ArrayList<String>();
         for (Block block : this.autoBreakWhitelist) {
-            ResourceLocation key = BuiltInRegistries.BLOCK.getKey((Object)block);
+            ResourceLocation key = BuiltInRegistries.BLOCK.getKey(block);
             if (key == null) continue;
             ids.add(key.toString());
         }

@@ -18,7 +18,7 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import org.batchpacket.submitchange_batchpacket.AreaSelectionManager;
 
-@EventBusSubscriber(value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
+@EventBusSubscriber(value = Dist.CLIENT, bus = EventBusSubscriber.Bus.FORGE)
 public class AreaSelectionRenderer {
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
