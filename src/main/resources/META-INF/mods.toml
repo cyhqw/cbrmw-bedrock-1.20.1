@@ -8,8 +8,9 @@ version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
 description = '''
-Piston auto-break bedrock client-side utility for Create mod.
-Ported from NeoForge 1.21.1 to Forge 1.20.1.
+随心所欲破基岩模组 - 活塞自动破基岩客户端工具
+基于Create模组的扳手菜单功能，支持准星白名单、区域白名单、区域全部三种破方块模式。
+从NeoForge 1.21.1移植到Forge 1.20.1。
 '''
 
 [[dependencies."${mod_id}"]]
