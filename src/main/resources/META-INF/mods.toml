@@ -15,21 +15,21 @@ description = '''
 
 [[dependencies."${mod_id}"]]
     modId = "forge"
-    type = "required"
+    mandatory = true
     versionRange = "${forge_version_range}"
     ordering = "NONE"
     side = "CLIENT"
 
 [[dependencies."${mod_id}"]]
     modId = "minecraft"
-    type = "required"
+    mandatory = true
     versionRange = "${minecraft_version_range}"
     ordering = "NONE"
     side = "CLIENT"
 
 [[dependencies."${mod_id}"]]
     modId = "create"
-    type = "required"
+    mandatory = true
     versionRange = "${create_version_range}"
     ordering = "AFTER"
     side = "BOTH"
