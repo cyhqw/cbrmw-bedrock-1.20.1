@@ -403,7 +403,7 @@ public class AutoBreakBedrock {
         if (autoBreakMode == ModConfig.AutoBreakMode.OFF) {
             return false;
         }
-        if (autoBreakMode == ModConfig.AutoBreakMode.AREA_WHITELIST || autoBreakMode == ModConfig.AutoBreakMode.AREA_ALL) {
+        if (autoBreakMode == ModConfig.AutoBreakMode.AREA_WHITELIST || autoBreakMode == ModConfig.AutoBreakMode.AREA_CHUNK || autoBreakMode == ModConfig.AutoBreakMode.AREA_ALL) {
             return false;
         }
         if (!isPressed) {
@@ -611,7 +611,9 @@ public class AutoBreakBedrock {
 
     private static boolean isAreaMode() {
         ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
-        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST || mode == ModConfig.AutoBreakMode.AREA_ALL;
+        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST
+            || mode == ModConfig.AutoBreakMode.AREA_CHUNK
+            || mode == ModConfig.AutoBreakMode.AREA_ALL;
     }
 
     private static boolean isWhitelistedBreakTarget(BlockState targetState) {

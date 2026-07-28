@@ -57,9 +57,19 @@ public enum AreaSelectionManager {
         return ModConfig.getInstance().isBatchModeEnabled();
     }
 
+    private static boolean isAreaMode() {
+        ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
+        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST
+            || mode == ModConfig.AutoBreakMode.AREA_CHUNK
+            || mode == ModConfig.AutoBreakMode.AREA_ALL;
+    }
+
+    private static boolean isChunkMode() {
+        return ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_CHUNK;
+    }
+
     @SubscribeEvent
     public static void onMouseClick(InputEvent.MouseButton.Pre event) {
-        boolean areaBedrockModeEnabled;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) {
             return;
@@ -67,8 +77,11 @@ public enum AreaSelectionManager {
         if (mc.screen != null) {
             return;
         }
-        boolean bl = areaBedrockModeEnabled = ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_WHITELIST || ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_ALL;
+        boolean areaBedrockModeEnabled = isAreaMode();
         if (!INSTANCE.isBatchModeEnabled() && !areaBedrockModeEnabled) {
+            if (INSTANCE.hasActiveSelection()) {
+                INSTANCE.clearSelection();
+            }
             return;
         }
         if (event.getButton() == 1 && event.getAction() == 1) {
@@ -88,6 +101,23 @@ public enum AreaSelectionManager {
                 BlockHitResult blockHit = (BlockHitResult)hitResult;
                 event.setCanceled(true);
                 BlockPos clickedPos = blockHit.getBlockPos();
+
+                if (isChunkMode()) {
+                    int chunkX = clickedPos.getX() >> 4;
+                    int chunkZ = clickedPos.getZ() >> 4;
+                    int minY = mc.level.getMinBuildHeight();
+                    int maxY = mc.level.getMaxBuildHeight() - 1;
+                    BlockPos chunkStart = new BlockPos(chunkX << 4, minY, chunkZ << 4);
+                    BlockPos chunkEnd = new BlockPos((chunkX << 4) + 15, maxY, (chunkZ << 4) + 15);
+                    AreaSelectionManager.INSTANCE.selectionStart = chunkStart;
+                    AreaSelectionManager.INSTANCE.selectionEnd = chunkEnd;
+                    AreaSelectionManager.INSTANCE.selectionStartTime = System.currentTimeMillis();
+                    AreaSelectionManager.INSTANCE.lastSelectionStart = new BlockPos((Vec3i)chunkStart);
+                    AreaSelectionManager.INSTANCE.lastSelectionEnd = new BlockPos((Vec3i)chunkEnd);
+                    mc.player.displayClientMessage((Component)Component.literal((String)"\u533a\u5757\u5df2\u9009\u62e9\uff01"), true);
+                    return;
+                }
+
                 if (AreaSelectionManager.INSTANCE.selectionStart != null && AreaSelectionManager.INSTANCE.selectionEnd != null) {
                     AreaSelectionManager.INSTANCE.selectionStart = clickedPos;
                     AreaSelectionManager.INSTANCE.selectionEnd = null;
