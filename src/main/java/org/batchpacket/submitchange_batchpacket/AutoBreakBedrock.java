@@ -43,25 +43,26 @@ public class AutoBreakBedrock {
     private static final int AREA_SCAN_VERTICAL_RADIUS = 4;
     private static final int TARGET_SCAN_HORIZONTAL_RADIUS = 8;
     private static final int TARGET_SCAN_VERTICAL_RADIUS = 8;
-    private static final int PASSIVE_SCAN_INTERVAL_TICKS = 2;
+    private static final double SPHERICAL_SCAN_RADIUS_SQR = 80.0;
+    private static final int PASSIVE_SCAN_INTERVAL_TICKS = 1;
     private static final double RECYCLE_INTERACT_RANGE_SQR = 64.0;
-    private static final int RECYCLE_RETRY_INTERVAL_TICKS = 2;
-    private static final int GHOST_PROBE_INTERVAL_TICKS = 2;
+    private static final int RECYCLE_RETRY_INTERVAL_TICKS = 1;
+    private static final int GHOST_PROBE_INTERVAL_TICKS = 1;
     private static final int MAX_GHOST_PROBE_ATTEMPTS = 8;
-    private static final int RECYCLE_NON_PISTON_CONFIRM_TICKS = 20;
-    private static final int RECYCLE_CONFIRMATION_TICKS = 4;
+    private static final int RECYCLE_NON_PISTON_CONFIRM_TICKS = 10;
+    private static final int RECYCLE_CONFIRMATION_TICKS = 2;
     private static final int MAX_TASK_RETRIES = 3;
-    private static final int BEDROCK_CHECK_TIMEOUT_TICKS = 10;
+    private static final int BEDROCK_CHECK_TIMEOUT_TICKS = 6;
     private static final int PASSIVE_MONITOR_RADIUS = 8;
     private static final int PASSIVE_MONITOR_VERTICAL_RADIUS = 8;
     private static final int MIN_RECYCLE_DELAY_FOR_PISTON_A_TICKS = 4;
     private static final int MIN_PROCESSING_SPEED = 1;
     private static final int MAX_PROCESSING_SPEED = 100;
-    private static final int MAX_BATCH_INTERVAL_TICKS = 10;
+    private static final int MAX_BATCH_INTERVAL_TICKS = 5;
     private static final int MIN_BATCH_INTERVAL_TICKS = 1;
     private static final int TASK_STALL_RESET_TICKS = 5;
-    private static final int MAX_PLACEMENT_OPERATIONS_PER_TICK = 1;
-    private static final int MAX_RECYCLE_OPERATIONS_PER_TICK = 1;
+    private static final int MAX_PLACEMENT_OPERATIONS_PER_TICK = 2;
+    private static final int MAX_RECYCLE_OPERATIONS_PER_TICK = 2;
     private static final double PISTON_OPERATION_MARGIN = 2.0;
     private static boolean isLeftKeyPressed = false;
     private static final Map<BlockPos, BedrockCheckTask> bedrockTasks = new HashMap<BlockPos, BedrockCheckTask>();
@@ -166,6 +167,9 @@ public class AutoBreakBedrock {
         for (int dy = -PASSIVE_MONITOR_VERTICAL_RADIUS; dy <= PASSIVE_MONITOR_VERTICAL_RADIUS; ++dy) {
             for (int dx = -PASSIVE_MONITOR_RADIUS; dx <= PASSIVE_MONITOR_RADIUS; ++dx) {
                 for (int dz = -PASSIVE_MONITOR_RADIUS; dz <= PASSIVE_MONITOR_RADIUS; ++dz) {
+                    if (dx * dx + dy * dy + dz * dz > SPHERICAL_SCAN_RADIUS_SQR) {
+                        continue;
+                    }
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
@@ -247,6 +251,9 @@ public class AutoBreakBedrock {
         for (int dy = -AREA_SCAN_VERTICAL_RADIUS; dy <= AREA_SCAN_VERTICAL_RADIUS; ++dy) {
             for (int dx = -AREA_SCAN_HORIZONTAL_RADIUS; dx <= AREA_SCAN_HORIZONTAL_RADIUS; ++dx) {
                 for (int dz = -AREA_SCAN_HORIZONTAL_RADIUS; dz <= AREA_SCAN_HORIZONTAL_RADIUS; ++dz) {
+                    if (dx * dx + dy * dy + dz * dz > SPHERICAL_SCAN_RADIUS_SQR) {
+                        continue;
+                    }
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
@@ -493,7 +500,7 @@ public class AutoBreakBedrock {
 
     private static int getDynamicMaxActiveBreakTasks() {
         int speed = AutoBreakBedrock.getProcessingSpeed();
-        return Math.max(2, Math.min(8, 2 + speed / 20));
+        return Math.max(4, Math.min(16, 4 + speed / 10));
     }
 
     private static int getDynamicNewTasksPerAreaScan() {
@@ -507,8 +514,8 @@ public class AutoBreakBedrock {
     private static int getBatchIntervalTicks() {
         int speed = AutoBreakBedrock.getProcessingSpeed();
         double t = (double)(speed - 1) / 99.0;
-        int mapped = (int)Math.round(10.0 - 9.0 * t);
-        return Math.max(1, Math.min(10, mapped));
+        int mapped = (int)Math.round(5.0 - 4.0 * t);
+        return Math.max(1, Math.min(5, mapped));
     }
 
     private static boolean consumeOperationBudget() {
@@ -517,7 +524,7 @@ public class AutoBreakBedrock {
             placementOperationsThisTick = 0;
         }
         int maxOperations = Math.max(MAX_PLACEMENT_OPERATIONS_PER_TICK,
-            Math.min(8, 1 + AutoBreakBedrock.getProcessingSpeed() / 15));
+            Math.min(16, 1 + AutoBreakBedrock.getProcessingSpeed() / 8));
         if (placementOperationsThisTick >= maxOperations) {
             return false;
         }
@@ -531,7 +538,7 @@ public class AutoBreakBedrock {
             recycleOperationsThisTick = 0;
         }
         int maxOperations = Math.max(MAX_RECYCLE_OPERATIONS_PER_TICK,
-            Math.min(8, 1 + AutoBreakBedrock.getProcessingSpeed() / 15));
+            Math.min(16, 1 + AutoBreakBedrock.getProcessingSpeed() / 8));
         if (recycleOperationsThisTick >= maxOperations) {
             return false;
         }
@@ -658,6 +665,9 @@ public class AutoBreakBedrock {
         for (int dy = -TARGET_SCAN_VERTICAL_RADIUS; dy <= TARGET_SCAN_VERTICAL_RADIUS; ++dy) {
             for (int dx = -TARGET_SCAN_HORIZONTAL_RADIUS; dx <= TARGET_SCAN_HORIZONTAL_RADIUS; ++dx) {
                 for (int dz = -TARGET_SCAN_HORIZONTAL_RADIUS; dz <= TARGET_SCAN_HORIZONTAL_RADIUS; ++dz) {
+                    if (dx * dx + dy * dy + dz * dz > SPHERICAL_SCAN_RADIUS_SQR) {
+                        continue;
+                    }
                     BlockPos targetPos = playerPos.offset(dx, dy, dz);
                     if (!selectionManager.isWithinSelection(targetPos)) {
                         continue;
@@ -728,6 +738,12 @@ public class AutoBreakBedrock {
         for (int y = minY; y <= maxY; ++y) {
             for (int x = minX; x <= maxX; ++x) {
                 for (int z = minZ; z <= maxZ; ++z) {
+                    int dx = x - playerPos.getX();
+                    int dy = y - playerPos.getY();
+                    int dz = z - playerPos.getZ();
+                    if (dx * dx + dy * dy + dz * dz > SPHERICAL_SCAN_RADIUS_SQR) {
+                        continue;
+                    }
                     BlockPos pos = new BlockPos(x, y, z);
                     if (isValidBreakTarget(mc, pos)) {
                         return true;
@@ -866,9 +882,6 @@ public class AutoBreakBedrock {
             validAList.add(new AWithB(pistonAPos, bList));
         }
         if (validAList.isEmpty()) {
-            if (notifyWhenNoSpace) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6ca1\u6709\u8db3\u591f\u7684\u7a7a\u95f4\u653e\u7f6e\u6d3b\u585e\uff01");
-            }
             return false;
         }
         bedrockTasks.put(targetPos, new BedrockCheckTask(targetPos, targetState, validAList, areaTask));
@@ -1113,7 +1126,6 @@ public class AutoBreakBedrock {
             }
             if (this.placedAPos == null) {
                 if (this.tryAIndex >= this.validAList.size()) {
-                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6d3b\u585e\u653e\u7f6e\u5931\u8d25");
                     this.breakingPistons = true;
                     this.pistonsPlaced = true;
                     return false;
