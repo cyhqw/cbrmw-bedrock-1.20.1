@@ -261,11 +261,11 @@ public class AutoBreakBedrock {
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
-                    if (!state.isAir() && !AutoBreakBedrock.hasFluid(state)) {
+                    if (!state.isAir() && !AutoBreakBedrock.isFluidBlock(state)) {
                         nearbyObservedNonAirAroundSelection.add(pos2);
                         continue;
                     }
-                    if (AutoBreakBedrock.hasFluid(state)) {
+                    if (AutoBreakBedrock.isFluidBlock(state)) {
                         nearbyObservedNonAirAroundSelection.remove(pos2);
                         continue;
                     }
@@ -805,7 +805,7 @@ public class AutoBreakBedrock {
     }
 
     private static boolean isEligibleBreakTarget(BlockState targetState) {
-        if (targetState == null || targetState.isAir() || AutoBreakBedrock.hasFluid(targetState)) {
+        if (targetState == null || targetState.isAir() || AutoBreakBedrock.isFluidBlock(targetState)) {
             return false;
         }
         if (targetState.getBlock() == Blocks.PISTON || targetState.getBlock() == Blocks.STICKY_PISTON) {
@@ -818,8 +818,13 @@ public class AutoBreakBedrock {
         return state != null && !state.getFluidState().isEmpty();
     }
 
+    private static boolean isFluidBlock(BlockState state) {
+        return state != null
+            && (state.getBlock() == Blocks.WATER || state.getBlock() == Blocks.LAVA);
+    }
+
     private static boolean isPistonPlacementSpace(BlockState state) {
-        return state != null && !AutoBreakBedrock.hasFluid(state)
+        return state != null
             && (state.isAir() || state.canBeReplaced());
     }
 
