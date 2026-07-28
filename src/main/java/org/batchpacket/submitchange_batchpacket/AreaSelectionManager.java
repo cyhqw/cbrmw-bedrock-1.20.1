@@ -25,6 +25,14 @@ public enum AreaSelectionManager {
     private BlockState lastPacketState = null;
     private BlockPos lastSelectionStart = null;
     private BlockPos lastSelectionEnd = null;
+    private BlockPos cachedBoundsStart;
+    private BlockPos cachedBoundsEnd;
+    private int minSelectionX;
+    private int minSelectionY;
+    private int minSelectionZ;
+    private int maxSelectionX;
+    private int maxSelectionY;
+    private int maxSelectionZ;
 
     public void reset() {
         this.batchModeActive = false;
@@ -32,6 +40,7 @@ public enum AreaSelectionManager {
         this.selectionEnd = null;
         this.originalPacketData = null;
         this.selectionStartTime = 0L;
+        this.invalidateSelectionBounds();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.sendSystemMessage((Component)Component.literal((String)"\u6279\u91cf\u5904\u7406\u6a21\u5f0f\u5df2\u5173\u95ed"));
@@ -44,6 +53,7 @@ public enum AreaSelectionManager {
         this.selectionEnd = null;
         this.originalPacketData = null;
         this.selectionStartTime = 0L;
+        this.invalidateSelectionBounds();
     }
 
     public void clearSelection() {
@@ -51,6 +61,7 @@ public enum AreaSelectionManager {
         this.selectionEnd = null;
         this.originalPacketData = null;
         this.selectionStartTime = 0L;
+        this.invalidateSelectionBounds();
     }
 
     public boolean isBatchModeEnabled() {
@@ -173,13 +184,29 @@ public enum AreaSelectionManager {
         if (!this.hasActiveSelection() || pos == null) {
             return false;
         }
-        int minX = Math.min(this.selectionStart.getX(), this.selectionEnd.getX());
-        int minY = Math.min(this.selectionStart.getY(), this.selectionEnd.getY());
-        int minZ = Math.min(this.selectionStart.getZ(), this.selectionEnd.getZ());
-        int maxX = Math.max(this.selectionStart.getX(), this.selectionEnd.getX());
-        int maxY = Math.max(this.selectionStart.getY(), this.selectionEnd.getY());
-        int maxZ = Math.max(this.selectionStart.getZ(), this.selectionEnd.getZ());
-        return pos.getX() >= minX && pos.getX() <= maxX && pos.getY() >= minY && pos.getY() <= maxY && pos.getZ() >= minZ && pos.getZ() <= maxZ;
+        this.updateSelectionBounds();
+        return pos.getX() >= this.minSelectionX && pos.getX() <= this.maxSelectionX
+            && pos.getY() >= this.minSelectionY && pos.getY() <= this.maxSelectionY
+            && pos.getZ() >= this.minSelectionZ && pos.getZ() <= this.maxSelectionZ;
+    }
+
+    private void updateSelectionBounds() {
+        if (this.selectionStart == this.cachedBoundsStart && this.selectionEnd == this.cachedBoundsEnd) {
+            return;
+        }
+        this.cachedBoundsStart = this.selectionStart;
+        this.cachedBoundsEnd = this.selectionEnd;
+        this.minSelectionX = Math.min(this.selectionStart.getX(), this.selectionEnd.getX());
+        this.minSelectionY = Math.min(this.selectionStart.getY(), this.selectionEnd.getY());
+        this.minSelectionZ = Math.min(this.selectionStart.getZ(), this.selectionEnd.getZ());
+        this.maxSelectionX = Math.max(this.selectionStart.getX(), this.selectionEnd.getX());
+        this.maxSelectionY = Math.max(this.selectionStart.getY(), this.selectionEnd.getY());
+        this.maxSelectionZ = Math.max(this.selectionStart.getZ(), this.selectionEnd.getZ());
+    }
+
+    private void invalidateSelectionBounds() {
+        this.cachedBoundsStart = null;
+        this.cachedBoundsEnd = null;
     }
 
     public BlockState getOriginalPacketData() {

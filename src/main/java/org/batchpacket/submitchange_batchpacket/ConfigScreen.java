@@ -96,7 +96,13 @@ public class ConfigScreen extends Screen {
 
     @Override
     public void onClose() {
+        ModConfig.getInstance().saveToDisk();
         Minecraft.getInstance().setScreen(this.parent);
+    }
+
+    @Override
+    public void removed() {
+        ModConfig.getInstance().saveToDisk();
     }
 
     private static class ProcessingSpeedSlider extends AbstractSliderButton {
@@ -114,7 +120,7 @@ public class ConfigScreen extends Screen {
         @Override
         protected void applyValue() {
             int speed = (int)(1.0 + this.value * 99.0);
-            ModConfig.getInstance().setProcessingSpeed(speed);
+            ModConfig.getInstance().updateProcessingSpeed(speed);
             this.updateMessage();
         }
     }

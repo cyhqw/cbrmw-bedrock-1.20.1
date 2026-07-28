@@ -8,9 +8,9 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileAttribute;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -56,7 +56,11 @@ public class ModConfig {
     }
 
     public void setBatchMode(BatchMode mode) {
-        this.batchMode = mode == null ? BatchMode.OFF : mode;
+        BatchMode normalized = mode == null ? BatchMode.OFF : mode;
+        if (this.batchMode == normalized) {
+            return;
+        }
+        this.batchMode = normalized;
         this.saveIfAllowed();
     }
 
@@ -72,8 +76,7 @@ public class ModConfig {
     public void setPacketSendDelay(int delay) {
         int clampedDelay = Math.max(5, Math.min(500, delay));
         double ratio = (500.0 - (double)clampedDelay) / 495.0;
-        this.processingSpeed = ModConfig.clampSpeed((int)Math.round(1.0 + ratio * 99.0));
-        this.saveIfAllowed();
+        this.setProcessingSpeed((int)Math.round(1.0 + ratio * 99.0));
     }
 
     public int getPacketsPerBatch() {
@@ -84,8 +87,7 @@ public class ModConfig {
     public void setPacketsPerBatch(int count) {
         int clampedCount = Math.max(1, Math.min(1000, count));
         double ratio = (double)(clampedCount - 1) / 999.0;
-        this.processingSpeed = ModConfig.clampSpeed((int)Math.round(1.0 + ratio * 99.0));
-        this.saveIfAllowed();
+        this.setProcessingSpeed((int)Math.round(1.0 + ratio * 99.0));
     }
 
     public int getProcessingSpeed() {
@@ -93,8 +95,17 @@ public class ModConfig {
     }
 
     public void setProcessingSpeed(int speed) {
-        this.processingSpeed = ModConfig.clampSpeed(speed);
+        int clampedSpeed = ModConfig.clampSpeed(speed);
+        if (this.processingSpeed == clampedSpeed) {
+            return;
+        }
+        this.processingSpeed = clampedSpeed;
         this.saveIfAllowed();
+    }
+
+    /** Updates the live value without writing on every slider movement. */
+    public void updateProcessingSpeed(int speed) {
+        this.processingSpeed = ModConfig.clampSpeed(speed);
     }
 
     public BlockState getLastSavedPacketState() {
@@ -118,7 +129,11 @@ public class ModConfig {
     }
 
     public void setAutoBreakMode(AutoBreakMode mode) {
-        this.autoBreakMode = mode == null ? AutoBreakMode.OFF : mode;
+        AutoBreakMode normalized = mode == null ? AutoBreakMode.OFF : mode;
+        if (this.autoBreakMode == normalized) {
+            return;
+        }
+        this.autoBreakMode = normalized;
         this.saveIfAllowed();
     }
 
@@ -258,10 +273,17 @@ public class ModConfig {
         try {
             Path parent = CONFIG_PATH.getParent();
             if (parent != null) {
-                Files.createDirectories(parent, new FileAttribute[0]);
+                Files.createDirectories(parent);
             }
-            try (BufferedWriter writer = Files.newBufferedWriter(CONFIG_PATH, new OpenOption[0]);){
+            Path tempPath = CONFIG_PATH.resolveSibling(CONFIG_PATH.getFileName() + ".tmp");
+            try (BufferedWriter writer = Files.newBufferedWriter(tempPath,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
                 GSON.toJson((Object)data, (Appendable)writer);
+            }
+            try {
+                Files.move(tempPath, CONFIG_PATH, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(tempPath, CONFIG_PATH, StandardCopyOption.REPLACE_EXISTING);
             }
         }
         catch (IOException e) {

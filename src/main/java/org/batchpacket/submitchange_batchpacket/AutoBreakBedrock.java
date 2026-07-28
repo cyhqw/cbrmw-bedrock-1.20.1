@@ -16,11 +16,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
@@ -39,11 +41,15 @@ import org.batchpacket.submitchange_batchpacket.ModConfig;
 public class AutoBreakBedrock {
     private static final int AREA_SCAN_HORIZONTAL_RADIUS = 4;
     private static final int AREA_SCAN_VERTICAL_RADIUS = 4;
+    private static final int PASSIVE_SCAN_INTERVAL_TICKS = 2;
     private static final double RECYCLE_INTERACT_RANGE_SQR = 64.0;
     private static final int RECYCLE_RETRY_INTERVAL_TICKS = 2;
     private static final int GHOST_PROBE_INTERVAL_TICKS = 2;
     private static final int MAX_GHOST_PROBE_ATTEMPTS = 8;
     private static final int RECYCLE_NON_PISTON_CONFIRM_TICKS = 20;
+    private static final int RECYCLE_CONFIRMATION_TICKS = 4;
+    private static final int MAX_TASK_RETRIES = 3;
+    private static final int BEDROCK_CHECK_TIMEOUT_TICKS = 10;
     private static final int PASSIVE_MONITOR_RADIUS = 8;
     private static final int PASSIVE_MONITOR_VERTICAL_RADIUS = 8;
     private static final int MIN_RECYCLE_DELAY_FOR_PISTON_A_TICKS = 4;
@@ -56,14 +62,18 @@ public class AutoBreakBedrock {
     private static final Map<BlockPos, BedrockCheckTask> bedrockTasks = new HashMap<BlockPos, BedrockCheckTask>();
     private static final LinkedHashSet<BlockPos> pendingAreaTargets = new LinkedHashSet();
     private static int areaScanTickCounter = 0;
+    private static int passiveScanTickCounter = 0;
+    private static int ghostProbeTickCounter = 0;
     private static int areaSelectionCursor = 0;
     private static boolean areaModeSelectionHintShown = false;
+    private static boolean noBreakTargetHintShown = false;
     private static final Set<BlockPos> pendingRecyclePistons = new HashSet<BlockPos>();
     private static final Set<BlockPos> nearbyObservedNonPiston = new HashSet<BlockPos>();
     private static final Set<BlockPos> nearbyObservedNonAirAroundSelection = new HashSet<BlockPos>();
     private static final Map<BlockPos, Integer> pistonAPlacedTick = new HashMap<BlockPos, Integer>();
     private static int globalTickCounter = 0;
-    private static int bedrockTaskCursor = 0;
+    private static Object activeClientLevel;
+    private static Player activeClientPlayer;
     private static final Map<BlockPos, RecycleTask> recycleTasks = new HashMap<BlockPos, RecycleTask>();
 
     private static void registerPlacedPiston(BlockPos pos, boolean isPistonA) {
@@ -114,19 +124,26 @@ public class AutoBreakBedrock {
         }
         if (!AutoBreakBedrock.isAreaMode()) {
             nearbyObservedNonPiston.clear();
+            passiveScanTickCounter = 0;
             return;
         }
         AreaSelectionManager selectionManager = AreaSelectionManager.INSTANCE;
         if (!selectionManager.hasActiveSelection()) {
             nearbyObservedNonPiston.clear();
+            passiveScanTickCounter = 0;
             return;
         }
         BlockPos start = selectionManager.getSelectionStart();
         BlockPos end = selectionManager.getSelectionEnd();
         if (start == null || end == null) {
             nearbyObservedNonPiston.clear();
+            passiveScanTickCounter = 0;
             return;
         }
+        if (++passiveScanTickCounter < PASSIVE_SCAN_INTERVAL_TICKS) {
+            return;
+        }
+        passiveScanTickCounter = 0;
         int border = 3;
         int minX = Math.min(start.getX(), end.getX()) - 3;
         int minY = Math.min(start.getY(), end.getY()) - 3;
@@ -136,9 +153,9 @@ public class AutoBreakBedrock {
         int maxZ = Math.max(start.getZ(), end.getZ()) + 3;
         BlockPos playerPos = mc.player.blockPosition();
         nearbyObservedNonPiston.removeIf(pos -> pos.getX() < minX || pos.getX() > maxX || pos.getY() < minY || pos.getY() > maxY || pos.getZ() < minZ || pos.getZ() > maxZ);
-        for (int dy = -8; dy <= 8; ++dy) {
-            for (int dx = -8; dx <= 8; ++dx) {
-                for (int dz = -8; dz <= 8; ++dz) {
+        for (int dy = -PASSIVE_MONITOR_VERTICAL_RADIUS; dy <= PASSIVE_MONITOR_VERTICAL_RADIUS; ++dy) {
+            for (int dx = -PASSIVE_MONITOR_RADIUS; dx <= PASSIVE_MONITOR_RADIUS; ++dx) {
+                for (int dz = -PASSIVE_MONITOR_RADIUS; dz <= PASSIVE_MONITOR_RADIUS; ++dz) {
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
@@ -159,8 +176,16 @@ public class AutoBreakBedrock {
             mc.execute(AutoBreakBedrock::tick);
             return;
         }
+        if (activeClientLevel != mc.level || activeClientPlayer != mc.player) {
+            AutoBreakBedrock.resetForClientContextChange();
+            activeClientLevel = mc.level;
+            activeClientPlayer = mc.player;
+        }
         ++globalTickCounter;
         if (ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.OFF) {
+            // Recycle work must continue after the user turns automation off.
+            AutoBreakBedrock.recyclePendingPistons(mc);
+            AutoBreakBedrock.processRecycleTasks(mc);
             AutoBreakBedrock.clearAutomationRuntimeState();
             return;
         }
@@ -175,19 +200,26 @@ public class AutoBreakBedrock {
     private static void probeGhostAirTransitionsNearSelection(Minecraft mc) {
         if (!AutoBreakBedrock.isAreaMode() || mc.level == null || mc.player == null) {
             nearbyObservedNonAirAroundSelection.clear();
+            ghostProbeTickCounter = 0;
             return;
         }
         AreaSelectionManager selectionManager = AreaSelectionManager.INSTANCE;
         if (!selectionManager.hasActiveSelection()) {
             nearbyObservedNonAirAroundSelection.clear();
+            ghostProbeTickCounter = 0;
             return;
         }
         BlockPos start = selectionManager.getSelectionStart();
         BlockPos end = selectionManager.getSelectionEnd();
         if (start == null || end == null) {
             nearbyObservedNonAirAroundSelection.clear();
+            ghostProbeTickCounter = 0;
             return;
         }
+        if (++ghostProbeTickCounter < GHOST_PROBE_INTERVAL_TICKS) {
+            return;
+        }
+        ghostProbeTickCounter = 0;
         boolean border = true;
         int minX = Math.min(start.getX(), end.getX()) - 1;
         int minY = Math.min(start.getY(), end.getY()) - 1;
@@ -202,9 +234,9 @@ public class AutoBreakBedrock {
             }
             return pos.getX() < minX || pos.getX() > maxX || pos.getY() < minY || pos.getY() > maxY || pos.getZ() < minZ || pos.getZ() > maxZ;
         });
-        for (int dy = -4; dy <= 4; ++dy) {
-            for (int dx = -4; dx <= 4; ++dx) {
-                for (int dz = -4; dz <= 4; ++dz) {
+        for (int dy = -AREA_SCAN_VERTICAL_RADIUS; dy <= AREA_SCAN_VERTICAL_RADIUS; ++dy) {
+            for (int dx = -AREA_SCAN_HORIZONTAL_RADIUS; dx <= AREA_SCAN_HORIZONTAL_RADIUS; ++dx) {
+                for (int dz = -AREA_SCAN_HORIZONTAL_RADIUS; dz <= AREA_SCAN_HORIZONTAL_RADIUS; ++dz) {
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
@@ -245,7 +277,15 @@ public class AutoBreakBedrock {
         }
         BlockState state = mc.level.getBlockState(task.pos);
         if (state.getBlock() == Blocks.PISTON) {
+            task.manualRetry = false;
+            task.removalAttemptAccepted = false;
+            task.removalConfirmTicks = 0;
             return AutoBreakBedrock.advanceRecycleTaskWhenPistonPresent(mc, task);
+        }
+        if (task.manualRetry) {
+            AutoBreakBedrock.refreshClientBlock(mc, task.pos);
+            task.cooldownTicks = RECYCLE_NON_PISTON_CONFIRM_TICKS;
+            return false;
         }
         return AutoBreakBedrock.advanceRecycleTaskWhenNonPiston(mc, task);
     }
@@ -256,92 +296,122 @@ public class AutoBreakBedrock {
             return false;
         }
         boolean attempted = AutoBreakBedrock.breakBlockWithEquippedWrench(mc, task.pos);
-        task.cooldownTicks = 2;
+        task.cooldownTicks = RECYCLE_RETRY_INTERVAL_TICKS;
         if (attempted) {
             ++task.attempts;
+            task.removalAttemptAccepted = true;
         }
         if ((afterState = mc.level.getBlockState(task.pos)).getBlock() == Blocks.PISTON) {
             task.nonPistonTicks = 0;
             return false;
         }
-        task.nonPistonTicks = 1;
+        if (attempted) {
+            task.nonPistonTicks = 1;
+            task.removalConfirmTicks = 0;
+        }
         return false;
     }
 
     private static boolean advanceRecycleTaskWhenNonPiston(Minecraft mc, RecycleTask task) {
-        ++task.nonPistonTicks;
-        AutoBreakBedrock.refreshClientBlock(mc, task.pos);
-        if (task.nonPistonTicks % 2 == 0 && task.attempts < 8 && AutoBreakBedrock.consumeRecycleOperationBudget()) {
-            BlockState afterProbe;
-            boolean attempted = AutoBreakBedrock.breakBlockWithEquippedWrench(mc, task.pos);
-            task.cooldownTicks = 2;
-            if (attempted) {
-                ++task.attempts;
-            }
-            if ((afterProbe = mc.level.getBlockState(task.pos)).getBlock() == Blocks.PISTON) {
+        if (task.removalAttemptAccepted) {
+            if (mc.level.getBlockState(task.pos).getBlock() == Blocks.PISTON) {
+                task.removalAttemptAccepted = false;
+                task.removalConfirmTicks = 0;
                 task.nonPistonTicks = 0;
                 return false;
             }
+            if (++task.removalConfirmTicks >= RECYCLE_CONFIRMATION_TICKS) {
+                return true;
+            }
+            return false;
         }
-        return task.nonPistonTicks >= 20;
+        ++task.nonPistonTicks;
+        AutoBreakBedrock.refreshClientBlock(mc, task.pos);
+        if (task.nonPistonTicks % RECYCLE_RETRY_INTERVAL_TICKS == 0
+            && task.attempts < MAX_GHOST_PROBE_ATTEMPTS
+            && AutoBreakBedrock.consumeRecycleOperationBudget()) {
+            BlockState afterProbe;
+            boolean attempted = AutoBreakBedrock.breakBlockWithEquippedWrench(mc, task.pos);
+            task.cooldownTicks = RECYCLE_RETRY_INTERVAL_TICKS;
+            if (attempted) {
+                ++task.attempts;
+                task.removalAttemptAccepted = true;
+                task.removalConfirmTicks = 0;
+            }
+            if ((afterProbe = mc.level.getBlockState(task.pos)).getBlock() == Blocks.PISTON) {
+                task.nonPistonTicks = 0;
+                task.removalAttemptAccepted = false;
+                task.removalConfirmTicks = 0;
+                return false;
+            }
+        }
+        if (task.nonPistonTicks < RECYCLE_NON_PISTON_CONFIRM_TICKS) {
+            return false;
+        }
+        // Keep an unresolved position for a later client state update.
+        task.manualRetry = true;
+        task.cooldownTicks = RECYCLE_NON_PISTON_CONFIRM_TICKS;
+        return false;
     }
 
     private static void processBedrockTasks(Minecraft mc) {
         if (mc.level == null || mc.player == null) {
             return;
         }
-        HashSet<BlockPos> finished = new HashSet<BlockPos>();
+        ArrayList<BlockPos> finished = new ArrayList<BlockPos>();
         if (bedrockTasks.isEmpty()) {
-            bedrockTaskCursor = 0;
             return;
         }
-        ArrayList<BlockPos> taskOrder = new ArrayList<BlockPos>();
         for (Map.Entry<BlockPos, BedrockCheckTask> entry : bedrockTasks.entrySet()) {
             BlockPos pos = entry.getKey();
             BedrockCheckTask task = entry.getValue();
             if (task.isAreaTask() && !AutoBreakBedrock.isWithinPlayerAreaWindow((Player)mc.player, pos)) continue;
-            taskOrder.add(pos);
-        }
-        if (taskOrder.isEmpty()) {
-            bedrockTaskCursor = 0;
-            return;
-        }
-        int taskCount = taskOrder.size();
-        int startIndex = Math.floorMod(bedrockTaskCursor, taskCount);
-        int checksThisTick = 0;
-        for (int offset = 0; offset < taskCount; ++offset) {
-            int index = (startIndex + offset) % taskCount;
-            BlockPos pos = (BlockPos)taskOrder.get(index);
-            BedrockCheckTask task = bedrockTasks.get(pos);
-            if (task == null) continue;
             if (task.check()) {
                 finished.add(pos);
             }
-            ++checksThisTick;
         }
-        bedrockTaskCursor = (startIndex + checksThisTick) % taskCount;
         for (BlockPos pos : finished) {
             bedrockTasks.remove(pos);
-        }
-        if (bedrockTasks.isEmpty()) {
-            bedrockTaskCursor = 0;
         }
     }
 
     private static void clearAutomationRuntimeState() {
-        bedrockTasks.clear();
+        clearBedrockTasksAndQueueRecycling();
         pendingAreaTargets.clear();
-        recycleTasks.clear();
-        pendingRecyclePistons.clear();
         nearbyObservedNonPiston.clear();
         nearbyObservedNonAirAroundSelection.clear();
-        pistonAPlacedTick.clear();
         areaScanTickCounter = 0;
         areaSelectionCursor = 0;
         areaModeSelectionHintShown = false;
         isLeftKeyPressed = false;
         globalTickCounter = 0;
-        bedrockTaskCursor = 0;
+        passiveScanTickCounter = 0;
+        ghostProbeTickCounter = 0;
+        noBreakTargetHintShown = false;
+    }
+
+    private static void clearBedrockTasksAndQueueRecycling() {
+        for (BedrockCheckTask task : bedrockTasks.values()) {
+            task.enqueueAllRecycleCandidates();
+        }
+        bedrockTasks.clear();
+    }
+
+    private static void resetForClientContextChange() {
+        // Coordinates from another level or player must never be reused.
+        AreaSelectionManager.INSTANCE.clearSelection();
+        bedrockTasks.clear();
+        pendingAreaTargets.clear();
+        recycleTasks.clear();
+        pendingRecyclePistons.clear();
+        pistonAPlacedTick.clear();
+        nearbyObservedNonPiston.clear();
+        nearbyObservedNonAirAroundSelection.clear();
+        areaScanTickCounter = 0;
+        areaSelectionCursor = 0;
+        areaModeSelectionHintShown = false;
+        noBreakTargetHintShown = false;
+        globalTickCounter = 0;
     }
 
     private static boolean isWithinRecycleRange(Player player, BlockPos pos) {
@@ -459,7 +529,9 @@ public class AutoBreakBedrock {
         }
         if (!selectionManager.hasActiveSelection()) {
             pendingAreaTargets.clear();
+            areaScanTickCounter = 0;
             areaSelectionCursor = 0;
+            noBreakTargetHintShown = false;
             if (!areaModeSelectionHintShown) {
                 AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8bf7\u5148\u7528\u4e2d\u952e\u6846\u9009\u533a\u57df (\u5f3a\u5236\u8981\u6c42)");
                 areaModeSelectionHintShown = true;
@@ -467,26 +539,29 @@ public class AutoBreakBedrock {
             return;
         }
         areaModeSelectionHintShown = false;
+        if (++areaScanTickCounter < AutoBreakBedrock.getDynamicAreaScanIntervalTicks()) {
+            return;
+        }
+        areaScanTickCounter = 0;
         if (!AutoBreakBedrock.selectionContainsBreakTargetsInSelection(mc, selectionManager)) {
-            AutoBreakBedrock.clearAreaSelectionAndCaches(mc);
             ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
-            if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u53ef\u7834\u65b9\u5757");
-            } else {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u767d\u540d\u5355\u65b9\u5757");
+            if (!noBreakTargetHintShown) {
+                if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
+                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u53ef\u7834\u65b9\u5757");
+                } else {
+                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u767d\u540d\u5355\u65b9\u5757");
+                }
+                noBreakTargetHintShown = true;
             }
             return;
         }
+        noBreakTargetHintShown = false;
         AutoBreakBedrock.collectAreaTargetsToPending(mc, selectionManager);
         int maxActiveBreakTasks = AutoBreakBedrock.getDynamicMaxActiveBreakTasks();
         int nearbyActiveAreaTasks = AutoBreakBedrock.countNearbyActiveAreaTasks((Player)mc.player);
         if (nearbyActiveAreaTasks >= maxActiveBreakTasks) {
             return;
         }
-        if (++areaScanTickCounter < AutoBreakBedrock.getDynamicAreaScanIntervalTicks()) {
-            return;
-        }
-        areaScanTickCounter = 0;
         int availableSlots = maxActiveBreakTasks - nearbyActiveAreaTasks;
         int createBudget = Math.min(AutoBreakBedrock.getDynamicNewTasksPerAreaScan(), availableSlots);
         if (createBudget <= 0) {
@@ -502,9 +577,9 @@ public class AutoBreakBedrock {
         }
         pendingAreaTargets.clear();
         BlockPos playerPos = mc.player.blockPosition();
-        for (int dy = -4; dy <= 4; ++dy) {
-            for (int dx = -4; dx <= 4; ++dx) {
-                for (int dz = -4; dz <= 4; ++dz) {
+        for (int dy = -AREA_SCAN_VERTICAL_RADIUS; dy <= AREA_SCAN_VERTICAL_RADIUS; ++dy) {
+            for (int dx = -AREA_SCAN_HORIZONTAL_RADIUS; dx <= AREA_SCAN_HORIZONTAL_RADIUS; ++dx) {
+                for (int dz = -AREA_SCAN_HORIZONTAL_RADIUS; dz <= AREA_SCAN_HORIZONTAL_RADIUS; ++dz) {
                     BlockPos targetPos = playerPos.offset(dx, dy, dz);
                     if (!selectionManager.isWithinSelection(targetPos)) {
                         continue;
@@ -592,11 +667,19 @@ public class AutoBreakBedrock {
         }
         pendingAreaTargets.clear();
         nearbyObservedNonAirAroundSelection.clear();
-        bedrockTasks.entrySet().removeIf(entry -> ((BedrockCheckTask)entry.getValue()).isAreaTask());
+        Iterator<Map.Entry<BlockPos, BedrockCheckTask>> iterator = bedrockTasks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            BedrockCheckTask task = iterator.next().getValue();
+            if (!task.isAreaTask()) {
+                continue;
+            }
+            task.enqueueAllRecycleCandidates();
+            iterator.remove();
+        }
         areaScanTickCounter = 0;
-        bedrockTaskCursor = 0;
         areaSelectionCursor = 0;
         areaModeSelectionHintShown = false;
+        noBreakTargetHintShown = false;
     }
 
     private static boolean isAreaMode() {
@@ -777,12 +860,24 @@ public class AutoBreakBedrock {
 
     private static int selectHotbarSlot(Player player, int slot) {
         int previousSlot = player.getInventory().selected;
+        if (previousSlot == slot) {
+            return previousSlot;
+        }
         player.getInventory().selected = slot;
+        if (player instanceof LocalPlayer localPlayer) {
+            localPlayer.connection.send(new ServerboundSetCarriedItemPacket(slot));
+        }
         return previousSlot;
     }
 
     private static void restoreHotbarSlot(Player player, int previousSlot) {
+        if (player.getInventory().selected == previousSlot) {
+            return;
+        }
         player.getInventory().selected = previousSlot;
+        if (player instanceof LocalPlayer localPlayer) {
+            localPlayer.connection.send(new ServerboundSetCarriedItemPacket(previousSlot));
+        }
     }
 
     private static int findWrenchInHotbar(Player player) {
@@ -808,6 +903,9 @@ public class AutoBreakBedrock {
         public int attempts = 0;
         public int cooldownTicks = 0;
         public int nonPistonTicks = 0;
+        public int removalConfirmTicks = 0;
+        public boolean removalAttemptAccepted = false;
+        public boolean manualRetry = false;
 
         public RecycleTask(BlockPos pos) {
             this.pos = pos;
@@ -832,6 +930,7 @@ public class AutoBreakBedrock {
         private BlockPos placedAPos = null;
         private BlockPos placedBPos = null;
         private int lastProgressTick;
+        private int retryCount = 0;
 
         public BedrockCheckTask(BlockPos targetPos, BlockState initialTargetState, List<AWithB> validAList, boolean areaTask) {
             this.targetPos = targetPos;
@@ -855,7 +954,13 @@ public class AutoBreakBedrock {
                 this.enqueueAllRecycleCandidates();
                 return true;
             }
-            if (globalTickCounter - this.lastProgressTick >= 5) {
+            if (!this.waitingRecycleBeforeNextA
+                && globalTickCounter - this.lastProgressTick >= TASK_STALL_RESET_TICKS) {
+                if (this.retryCount >= MAX_TASK_RETRIES) {
+                    this.enqueueAllRecycleCandidates();
+                    return true;
+                }
+                ++this.retryCount;
                 int nextAIndex = this.getNextAIndexAfterStall();
                 this.enqueueAllRecycleCandidates();
                 this.resetForRetry(nextAIndex);
@@ -1000,7 +1105,7 @@ public class AutoBreakBedrock {
             ++this.tickCount;
             BlockState currentState = mc.level.getBlockState(this.targetPos);
             boolean bl = targetChanged = currentState.getBlock() != this.initialTargetState.getBlock();
-            if (targetChanged || this.tickCount >= 10) {
+            if (targetChanged || this.tickCount >= BEDROCK_CHECK_TIMEOUT_TICKS) {
                 this.checkingBedrock = false;
                 this.breakingPistons = true;
                 this.touchProgress();
@@ -1045,6 +1150,7 @@ public class AutoBreakBedrock {
 
         private void touchProgress() {
             this.lastProgressTick = globalTickCounter;
+            this.retryCount = 0;
         }
 
         private void enqueueAllRecycleCandidates() {
