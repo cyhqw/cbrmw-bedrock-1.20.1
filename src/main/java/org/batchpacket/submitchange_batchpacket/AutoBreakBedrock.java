@@ -500,36 +500,23 @@ public class AutoBreakBedrock {
             pendingAreaTargets.clear();
             return;
         }
-        int sizeX = 9;
-        int sizeY = 9;
-        int sizeZ = 9;
-        int volume = sizeX * sizeY * sizeZ;
+        pendingAreaTargets.clear();
         BlockPos playerPos = mc.player.blockPosition();
-        pendingAreaTargets.removeIf(pos -> !AutoBreakBedrock.isWithinPlayerAreaWindow((Player)mc.player, pos) || !selectionManager.isWithinSelection((BlockPos)pos) || !AutoBreakBedrock.isWhitelistedBreakTarget(mc.level.getBlockState(pos)));
-        areaSelectionCursor = Math.floorMod(areaSelectionCursor, volume);
-        int visitedThisScan = 0;
-        for (int i = 0; i < volume; ++i) {
-            int index = (areaSelectionCursor + i) % volume;
-            int xOffset = index % sizeX;
-            int dx = xOffset - 4;
-            int yz = index / sizeX;
-            int yOffset = yz % sizeY;
-            int dy = yOffset - 4;
-            int zOffset = yz / sizeY;
-            int dz = zOffset - 4;
-            BlockPos targetPos = playerPos.offset(dx, dy, dz);
-            if (!selectionManager.isWithinSelection(targetPos) || bedrockTasks.containsKey(targetPos) || pendingAreaTargets.contains(targetPos)) {
-                ++visitedThisScan;
-                continue;
+        for (int dy = -4; dy <= 4; ++dy) {
+            for (int dx = -4; dx <= 4; ++dx) {
+                for (int dz = -4; dz <= 4; ++dz) {
+                    BlockPos targetPos = playerPos.offset(dx, dy, dz);
+                    if (!selectionManager.isWithinSelection(targetPos)) {
+                        continue;
+                    }
+                    if (bedrockTasks.containsKey(targetPos) || pendingAreaTargets.contains(targetPos)) {
+                        continue;
+                    }
+                    if (isValidBreakTarget(mc, targetPos)) {
+                        pendingAreaTargets.add(targetPos);
+                    }
+                }
             }
-            BlockState targetState = mc.level.getBlockState(targetPos);
-            if (AutoBreakBedrock.isWhitelistedBreakTarget(targetState)) {
-                pendingAreaTargets.add(targetPos);
-            }
-            ++visitedThisScan;
-        }
-        if (visitedThisScan > 0) {
-            areaSelectionCursor = (areaSelectionCursor + visitedThisScan) % volume;
         }
     }
 
@@ -549,11 +536,11 @@ public class AutoBreakBedrock {
                 iterator.remove();
                 continue;
             }
-            BlockState targetState = mc.level.getBlockState(targetPos);
-            if (!AutoBreakBedrock.isWhitelistedBreakTarget(targetState)) {
+            if (!isValidBreakTarget(mc, targetPos)) {
                 iterator.remove();
                 continue;
             }
+            BlockState targetState = mc.level.getBlockState(targetPos);
             if (!AutoBreakBedrock.tryCreateBreakTask(mc, targetPos, targetState, false, true)) continue;
             iterator.remove();
             ++created;
@@ -578,17 +565,20 @@ public class AutoBreakBedrock {
         if (start == null || end == null) {
             return false;
         }
-        int minX = Math.min(start.getX(), end.getX());
-        int minY = Math.min(start.getY(), end.getY());
-        int minZ = Math.min(start.getZ(), end.getZ());
-        int maxX = Math.max(start.getX(), end.getX());
-        int maxY = Math.max(start.getY(), end.getY());
-        int maxZ = Math.max(start.getZ(), end.getZ());
+        BlockPos playerPos = mc.player.blockPosition();
+        int minX = Math.max(Math.min(start.getX(), end.getX()), playerPos.getX() - 4);
+        int minY = Math.max(Math.min(start.getY(), end.getY()), playerPos.getY() - 4);
+        int minZ = Math.max(Math.min(start.getZ(), end.getZ()), playerPos.getZ() - 4);
+        int maxX = Math.min(Math.max(start.getX(), end.getX()), playerPos.getX() + 4);
+        int maxY = Math.min(Math.max(start.getY(), end.getY()), playerPos.getY() + 4);
+        int maxZ = Math.min(Math.max(start.getZ(), end.getZ()), playerPos.getZ() + 4);
         for (int y = minY; y <= maxY; ++y) {
             for (int x = minX; x <= maxX; ++x) {
                 for (int z = minZ; z <= maxZ; ++z) {
-                    if (!AutoBreakBedrock.isWhitelistedBreakTarget(mc.level.getBlockState(new BlockPos(x, y, z)))) continue;
-                    return true;
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (isValidBreakTarget(mc, pos)) {
+                        return true;
+                    }
                 }
             }
         }
@@ -617,11 +607,44 @@ public class AutoBreakBedrock {
     }
 
     private static boolean isWhitelistedBreakTarget(BlockState targetState) {
+        if (targetState == null || targetState.isAir()) {
+            return false;
+        }
+        if (targetState.getBlock() == Blocks.PISTON || targetState.getBlock() == Blocks.STICKY_PISTON) {
+            return false;
+        }
         ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
         if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
-            return targetState != null && !targetState.isAir();
+            return true;
         }
-        return targetState != null && !targetState.isAir() && ModConfig.getInstance().isWhitelistedAutoBreakBlock(targetState.getBlock());
+        return ModConfig.getInstance().isWhitelistedAutoBreakBlock(targetState.getBlock());
+    }
+
+    private static boolean isSurfaceExposed(Minecraft mc, BlockPos pos) {
+        if (mc.level == null) {
+            return false;
+        }
+        for (Direction dir : Direction.values()) {
+            BlockState neighborState = mc.level.getBlockState(pos.relative(dir));
+            if (neighborState.isAir() || neighborState.canBeReplaced()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isValidBreakTarget(Minecraft mc, BlockPos pos) {
+        if (mc.level == null) {
+            return false;
+        }
+        BlockState state = mc.level.getBlockState(pos);
+        if (!isWhitelistedBreakTarget(state)) {
+            return false;
+        }
+        if (bedrockTasks.containsKey(pos) || pendingRecyclePistons.contains(pos)) {
+            return false;
+        }
+        return isSurfaceExposed(mc, pos);
     }
 
     private static boolean tryCreateBreakTask(Minecraft mc, BlockPos targetPos, BlockState targetState, boolean notifyWhenNoSpace, boolean areaTask) {
@@ -853,7 +876,7 @@ public class AutoBreakBedrock {
 
         private boolean isCurrentTargetBlock(Minecraft mc) {
             BlockState currentState = mc.level.getBlockState(this.targetPos);
-            return currentState.getBlock() == this.initialTargetState.getBlock() && AutoBreakBedrock.isWhitelistedBreakTarget(currentState);
+            return currentState.getBlock() == this.initialTargetState.getBlock() && AutoBreakBedrock.isWhitelistedBreakTarget(currentState) && currentState.getBlock() != Blocks.PISTON && currentState.getBlock() != Blocks.STICKY_PISTON;
         }
 
         private boolean advancePlacementPhase(Minecraft mc) {
