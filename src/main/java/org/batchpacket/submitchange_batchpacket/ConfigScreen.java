@@ -7,13 +7,11 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.batchpacket.submitchange_batchpacket.ModConfig;
-import org.batchpacket.submitchange_batchpacket.WhitelistConfigScreen;
 
 public class ConfigScreen extends Screen {
     private final Screen parent;
     private Button autoBreakModeButton;
     private ProcessingSpeedSlider processingSpeedSlider;
-    private Button whitelistConfigButton;
 
     protected ConfigScreen(Screen parent) {
         super((Component)Component.literal((String)"\u673a\u68b0\u52a8\u529b:\u65b9\u5757\u65cb\u8f6c\u83dc\u5355\u6279\u53d1 \u914d\u7f6e"));
@@ -30,16 +28,16 @@ public class ConfigScreen extends Screen {
         this.autoBreakModeButton = Button.builder(this.getAutoBreakModeText(), button -> {
             ModConfig.AutoBreakMode current = config.getAutoBreakMode();
             ModConfig.AutoBreakMode next = switch (current) {
-                case OFF -> ModConfig.AutoBreakMode.CLICK_WHITELIST;
-                case CLICK_WHITELIST -> ModConfig.AutoBreakMode.AREA_WHITELIST;
-                case AREA_WHITELIST -> ModConfig.AutoBreakMode.AREA_CHUNK;
+                case OFF -> ModConfig.AutoBreakMode.CLICK;
+                case CLICK -> ModConfig.AutoBreakMode.AREA;
+                case AREA -> ModConfig.AutoBreakMode.AREA_CHUNK;
                 case AREA_CHUNK -> ModConfig.AutoBreakMode.AREA_ALL;
                 case AREA_ALL -> ModConfig.AutoBreakMode.OFF;
                 default -> throw new IllegalStateException();
             };
             config.setAutoBreakMode(next);
             button.setMessage(this.getAutoBreakModeText());
-            if (next != ModConfig.AutoBreakMode.AREA_WHITELIST && next != ModConfig.AutoBreakMode.AREA_CHUNK && next != ModConfig.AutoBreakMode.AREA_ALL) {
+            if (next != ModConfig.AutoBreakMode.AREA && next != ModConfig.AutoBreakMode.AREA_CHUNK && next != ModConfig.AutoBreakMode.AREA_ALL) {
                 AreaSelectionManager.INSTANCE.clearSelection();
             }
             this.sendModeMessage(next);
@@ -49,10 +47,6 @@ public class ConfigScreen extends Screen {
         this.processingSpeedSlider = new ProcessingSpeedSlider(this.width / 2 - 100, 75, 200, 20, config.getProcessingSpeed());
         this.addRenderableWidget(this.processingSpeedSlider);
 
-        this.whitelistConfigButton = Button.builder((Component)Component.literal((String)"\u81ea\u52a8\u7834\u65b9\u5757\u767d\u540d\u5355\u914d\u7f6e"), button -> {
-            Minecraft.getInstance().setScreen(WhitelistConfigScreen.create(this));
-        }).bounds(this.width / 2 - 100, 110, 200, 20).build();
-        this.addRenderableWidget(this.whitelistConfigButton);
     }
 
     @Override
@@ -64,9 +58,9 @@ public class ConfigScreen extends Screen {
     private Component getAutoBreakModeText() {
         return switch (ModConfig.getInstance().getAutoBreakMode()) {
             case OFF -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u5173\u95ed");
-            case CLICK_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u51c6\u661f\u767d\u540d\u5355");
-            case AREA_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u57df\u767d\u540d\u5355");
-            case AREA_CHUNK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u5757\u767d\u540d\u5355");
+            case CLICK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u51c6\u661f\u5904\u7406");
+            case AREA -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u57df\u5904\u7406");
+            case AREA_CHUNK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u5757\u5904\u7406");
             case AREA_ALL -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u57df\u5168\u90e8");
             default -> throw new IllegalStateException();
         };
@@ -79,9 +73,9 @@ public class ConfigScreen extends Screen {
         }
         Component msg = switch (mode) {
             case OFF -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u5df2\u5173\u95ed");
-            case CLICK_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u51c6\u661f\u767d\u540d\u5355\u6a21\u5f0f");
-            case AREA_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u57df\u767d\u540d\u5355\u6a21\u5f0f");
-            case AREA_CHUNK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u5757\u767d\u540d\u5355\u6a21\u5f0f (\u4e2d\u952e\u9009\u533a\u5757)");
+            case CLICK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u51c6\u661f\u5904\u7406\u6a21\u5f0f");
+            case AREA -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u57df\u5904\u7406\u6a21\u5f0f");
+            case AREA_CHUNK -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u5757\u5904\u7406\u6a21\u5f0f (\u4e2d\u952e\u9009\u533a\u5757)");
             case AREA_ALL -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u57df\u5168\u90e8\u6a21\u5f0f (\u5f3a\u5236\u9009\u53d6)");
             default -> throw new IllegalStateException();
         };

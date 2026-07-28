@@ -70,7 +70,7 @@ public enum AreaSelectionManager {
 
     private static boolean isAreaMode() {
         ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
-        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST
+        return mode == ModConfig.AutoBreakMode.AREA
             || mode == ModConfig.AutoBreakMode.AREA_CHUNK
             || mode == ModConfig.AutoBreakMode.AREA_ALL;
     }

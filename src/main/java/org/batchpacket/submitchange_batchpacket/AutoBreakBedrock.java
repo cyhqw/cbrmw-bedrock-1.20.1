@@ -552,7 +552,7 @@ public class AutoBreakBedrock {
         if (autoBreakMode == ModConfig.AutoBreakMode.OFF) {
             return false;
         }
-        if (autoBreakMode == ModConfig.AutoBreakMode.AREA_WHITELIST || autoBreakMode == ModConfig.AutoBreakMode.AREA_CHUNK || autoBreakMode == ModConfig.AutoBreakMode.AREA_ALL) {
+        if (autoBreakMode == ModConfig.AutoBreakMode.AREA || autoBreakMode == ModConfig.AutoBreakMode.AREA_CHUNK || autoBreakMode == ModConfig.AutoBreakMode.AREA_ALL) {
             return false;
         }
         if (!isPressed) {
@@ -580,7 +580,7 @@ public class AutoBreakBedrock {
         BlockHitResult hitResult = (BlockHitResult)mc.hitResult;
         BlockPos targetPos = hitResult.getBlockPos();
         BlockState targetState = mc.level.getBlockState(targetPos);
-        boolean bl = shouldHandle = autoBreakMode == ModConfig.AutoBreakMode.CLICK_WHITELIST && AutoBreakBedrock.isWhitelistedBreakTarget(targetState);
+        boolean bl = shouldHandle = autoBreakMode == ModConfig.AutoBreakMode.CLICK && AutoBreakBedrock.isEligibleBreakTarget(targetState);
         if (shouldHandle) {
             if (bedrockTasks.containsKey(targetPos)) {
                 AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8be5\u65b9\u5757\u6b63\u5728\u5904\u7406\u4e2d\uff0c\u8bf7\u7a0d\u5019\uff01");
@@ -628,11 +628,7 @@ public class AutoBreakBedrock {
         if (!AutoBreakBedrock.selectionContainsBreakTargetsInSelection(mc, selectionManager)) {
             ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
             if (!noBreakTargetHintShown) {
-                if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
-                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u53ef\u7834\u65b9\u5757");
-                } else {
-                    AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u767d\u540d\u5355\u65b9\u5757");
-                }
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u53ef\u5904\u7406\u65b9\u5757");
                 noBreakTargetHintShown = true;
             }
             return;
@@ -766,23 +762,19 @@ public class AutoBreakBedrock {
 
     private static boolean isAreaMode() {
         ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
-        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST
+        return mode == ModConfig.AutoBreakMode.AREA
             || mode == ModConfig.AutoBreakMode.AREA_CHUNK
             || mode == ModConfig.AutoBreakMode.AREA_ALL;
     }
 
-    private static boolean isWhitelistedBreakTarget(BlockState targetState) {
+    private static boolean isEligibleBreakTarget(BlockState targetState) {
         if (targetState == null || targetState.isAir() || AutoBreakBedrock.hasFluid(targetState)) {
             return false;
         }
         if (targetState.getBlock() == Blocks.PISTON || targetState.getBlock() == Blocks.STICKY_PISTON) {
             return false;
         }
-        ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
-        if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
-            return true;
-        }
-        return ModConfig.getInstance().isWhitelistedAutoBreakBlock(targetState.getBlock());
+        return true;
     }
 
     private static boolean hasFluid(BlockState state) {
@@ -812,7 +804,7 @@ public class AutoBreakBedrock {
             return false;
         }
         BlockState state = mc.level.getBlockState(pos);
-        if (!isWhitelistedBreakTarget(state)) {
+        if (!isEligibleBreakTarget(state)) {
             return false;
         }
         if (bedrockTasks.containsKey(pos) || pendingRecyclePistons.contains(pos)) {
@@ -822,6 +814,9 @@ public class AutoBreakBedrock {
     }
 
     private static boolean reservePistonPosition(Minecraft mc, BlockPos pos, BedrockCheckTask task) {
+        if (!AutoBreakBedrock.isWithinBuildHeight(mc, pos)) {
+            return false;
+        }
         BedrockCheckTask owner = pistonReservations.get(pos);
         if (owner != null && owner != task) {
             return false;
@@ -832,6 +827,12 @@ public class AutoBreakBedrock {
         }
         pistonReservations.put(pos, task);
         return true;
+    }
+
+    private static boolean isWithinBuildHeight(Minecraft mc, BlockPos pos) {
+        return mc.level != null
+            && pos.getY() >= mc.level.getMinBuildHeight()
+            && pos.getY() < mc.level.getMaxBuildHeight();
     }
 
     private static void releasePistonPosition(BlockPos pos, BedrockCheckTask task) {
@@ -850,12 +851,14 @@ public class AutoBreakBedrock {
         ArrayList<AWithB> validAList = new ArrayList<AWithB>();
         for (Direction dir : Direction.values()) {
             BlockPos pistonAPos = targetPos.relative(dir);
+            if (!AutoBreakBedrock.isWithinBuildHeight(mc, pistonAPos)) continue;
             BlockState pistonAState = mc.level.getBlockState(pistonAPos);
             if (!AutoBreakBedrock.isPistonPlacementSpace(pistonAState)) continue;
             ArrayList<BlockPos> bList = new ArrayList<BlockPos>();
             for (Direction bDir : Direction.values()) {
                 BlockState bState;
                 BlockPos bPos = pistonAPos.relative(bDir);
+                if (!AutoBreakBedrock.isWithinBuildHeight(mc, bPos)) continue;
                 if (bPos.equals((Object)targetPos) || !AutoBreakBedrock.isPistonPlacementSpace(bState = mc.level.getBlockState(bPos))) continue;
                 bList.add(bPos);
             }
@@ -1098,7 +1101,7 @@ public class AutoBreakBedrock {
 
         private boolean isCurrentTargetBlock(Minecraft mc) {
             BlockState currentState = mc.level.getBlockState(this.targetPos);
-            return currentState.getBlock() == this.initialTargetState.getBlock() && AutoBreakBedrock.isWhitelistedBreakTarget(currentState) && currentState.getBlock() != Blocks.PISTON && currentState.getBlock() != Blocks.STICKY_PISTON;
+            return currentState.getBlock() == this.initialTargetState.getBlock() && AutoBreakBedrock.isEligibleBreakTarget(currentState);
         }
 
         private boolean advancePlacementPhase(Minecraft mc) {
