@@ -60,6 +60,8 @@ public class AutoBreakBedrock {
     private static final int MAX_BATCH_INTERVAL_TICKS = 10;
     private static final int MIN_BATCH_INTERVAL_TICKS = 1;
     private static final int TASK_STALL_RESET_TICKS = 5;
+    private static final int MAX_PLACEMENT_OPERATIONS_PER_TICK = 1;
+    private static final int MAX_RECYCLE_OPERATIONS_PER_TICK = 1;
     private static boolean isLeftKeyPressed = false;
     private static final Map<BlockPos, BedrockCheckTask> bedrockTasks = new HashMap<BlockPos, BedrockCheckTask>();
     private static final Map<BlockPos, BedrockCheckTask> pistonReservations = new HashMap<BlockPos, BedrockCheckTask>();
@@ -75,6 +77,10 @@ public class AutoBreakBedrock {
     private static final Set<BlockPos> nearbyObservedNonAirAroundSelection = new HashSet<BlockPos>();
     private static final Map<BlockPos, Integer> pistonAPlacedTick = new HashMap<BlockPos, Integer>();
     private static int globalTickCounter = 0;
+    private static int placementBudgetTick = -1;
+    private static int placementOperationsThisTick = 0;
+    private static int recycleBudgetTick = -1;
+    private static int recycleOperationsThisTick = 0;
     private static Object activeClientLevel;
     private static Player activeClientPlayer;
     private static final Map<BlockPos, RecycleTask> recycleTasks = new HashMap<BlockPos, RecycleTask>();
@@ -287,6 +293,15 @@ public class AutoBreakBedrock {
             task.removalConfirmTicks = 0;
             return AutoBreakBedrock.advanceRecycleTaskWhenPistonPresent(mc, task);
         }
+        if (task.observedPiston) {
+            task.manualRetry = false;
+            task.removalAttemptAccepted = false;
+            task.nonPistonTicks = 0;
+            if (++task.removalConfirmTicks >= RECYCLE_CONFIRMATION_TICKS) {
+                return true;
+            }
+            return false;
+        }
         if (task.manualRetry) {
             AutoBreakBedrock.refreshClientBlock(mc, task.pos);
             if (task.observedPiston && AutoBreakBedrock.findWrenchInHotbar((Player)mc.player) != -1) {
@@ -325,6 +340,14 @@ public class AutoBreakBedrock {
     }
 
     private static boolean advanceRecycleTaskWhenNonPiston(Minecraft mc, RecycleTask task) {
+        if (!task.observedPiston) {
+            ++task.nonPistonTicks;
+            AutoBreakBedrock.refreshClientBlock(mc, task.pos);
+            if (task.nonPistonTicks >= RECYCLE_NON_PISTON_CONFIRM_TICKS) {
+                return true;
+            }
+            return false;
+        }
         if (task.removalAttemptAccepted) {
             if (mc.level.getBlockState(task.pos).getBlock() == Blocks.PISTON) {
                 task.removalAttemptAccepted = false;
@@ -463,8 +486,7 @@ public class AutoBreakBedrock {
     }
 
     private static int getDynamicMaxActiveBreakTasks() {
-        int speed = AutoBreakBedrock.getProcessingSpeed();
-        return Math.max(1, Math.min(8, 1 + speed / 15));
+        return 1;
     }
 
     private static int getDynamicNewTasksPerAreaScan() {
@@ -483,10 +505,26 @@ public class AutoBreakBedrock {
     }
 
     private static boolean consumeOperationBudget() {
+        if (placementBudgetTick != globalTickCounter) {
+            placementBudgetTick = globalTickCounter;
+            placementOperationsThisTick = 0;
+        }
+        if (placementOperationsThisTick >= MAX_PLACEMENT_OPERATIONS_PER_TICK) {
+            return false;
+        }
+        ++placementOperationsThisTick;
         return true;
     }
 
     private static boolean consumeRecycleOperationBudget() {
+        if (recycleBudgetTick != globalTickCounter) {
+            recycleBudgetTick = globalTickCounter;
+            recycleOperationsThisTick = 0;
+        }
+        if (recycleOperationsThisTick >= MAX_RECYCLE_OPERATIONS_PER_TICK) {
+            return false;
+        }
+        ++recycleOperationsThisTick;
         return true;
     }
 
@@ -1066,6 +1104,7 @@ public class AutoBreakBedrock {
                 }
                 if (!AutoBreakBedrock.consumeOperationBudget()) {
                     AutoBreakBedrock.releasePistonPosition(ab.aPos, this);
+                    this.touchProgress();
                     return false;
                 }
                 if (!AutoBreakBedrock.placePistonA(mc, ab.aPos, this.targetPos)) {
@@ -1078,6 +1117,7 @@ public class AutoBreakBedrock {
                 this.placedPistons.add(ab.aPos);
                 this.placedAPos = ab.aPos;
                 this.touchProgress();
+                return false;
             }
             AWithB ab = this.validAList.get(this.tryAIndex);
             if (this.tryBIndex >= ab.bList.size()) {
@@ -1099,6 +1139,7 @@ public class AutoBreakBedrock {
             }
             if (!AutoBreakBedrock.consumeOperationBudget()) {
                 AutoBreakBedrock.releasePistonPosition(bPos, this);
+                this.touchProgress();
                 return false;
             }
             if (AutoBreakBedrock.placePistonB(mc, bPos)) {
