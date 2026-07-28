@@ -8,6 +8,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -44,24 +47,19 @@ jobs:
       - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: latest
-          name: 随心所欲破基岩模组 - Latest Build
+          name: Latest Build
           body: |
-            ## 随心所欲破基岩模组
+            ## Latest Build
 
-            Forge 1.20.1 客户端模组，基于 Create 模组的扳手菜单功能。
+            Forge 1.20.1 client mod for Create.
 
-            ### 使用方法
-            1. 下载下方的 `.jar` 文件
-            2. 将其放入 `.minecraft/mods/` 文件夹
-            3. 确保已安装 Forge 1.20.1 和 Create 6.0.8+
-
-            ### 前置要求
+            ### Requirements
             - Minecraft 1.20.1
             - Forge 47+
             - Create 6.0.8+
           files: build/libs/*.jar
           prerelease: true
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
