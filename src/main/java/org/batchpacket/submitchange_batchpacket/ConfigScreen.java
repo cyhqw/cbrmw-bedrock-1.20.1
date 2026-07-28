@@ -32,7 +32,8 @@ public class ConfigScreen extends Screen {
             ModConfig.AutoBreakMode next = switch (current) {
                 case OFF -> ModConfig.AutoBreakMode.CLICK_WHITELIST;
                 case CLICK_WHITELIST -> ModConfig.AutoBreakMode.AREA_WHITELIST;
-                case AREA_WHITELIST -> ModConfig.AutoBreakMode.OFF;
+                case AREA_WHITELIST -> ModConfig.AutoBreakMode.AREA_ALL;
+                case AREA_ALL -> ModConfig.AutoBreakMode.OFF;
                 default -> throw new IllegalStateException();
             };
             config.setAutoBreakMode(next);
@@ -61,6 +62,7 @@ public class ConfigScreen extends Screen {
             case OFF -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u5173\u95ed");
             case CLICK_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u51c6\u661f\u767d\u540d\u5355");
             case AREA_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u57df\u767d\u540d\u5355");
+            case AREA_ALL -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u6a21\u5f0f: \u533a\u57df\u5168\u90e8");
             default -> throw new IllegalStateException();
         };
     }
@@ -74,6 +76,7 @@ public class ConfigScreen extends Screen {
             case OFF -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757\u5df2\u5173\u95ed");
             case CLICK_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u51c6\u661f\u767d\u540d\u5355\u6a21\u5f0f");
             case AREA_WHITELIST -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u57df\u767d\u540d\u5355\u6a21\u5f0f");
+            case AREA_ALL -> Component.literal("\u81ea\u52a8\u7834\u65b9\u5757: \u533a\u57df\u5168\u90e8\u6a21\u5f0f (\u5f3a\u5236\u9009\u53d6)");
             default -> throw new IllegalStateException();
         };
         mc.player.sendSystemMessage(msg);

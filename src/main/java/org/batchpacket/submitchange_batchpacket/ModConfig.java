@@ -333,6 +333,7 @@ public class ModConfig {
         return switch (normalized = value.trim().toUpperCase(Locale.ROOT)) {
             case "BEDROCK_ONLY", "GENERIC_BLOCK", "CLICK_WHITELIST" -> AutoBreakMode.CLICK_WHITELIST;
             case "AREA_BEDROCK", "AREA_WHITELIST" -> AutoBreakMode.AREA_WHITELIST;
+            case "AREA_ALL" -> AutoBreakMode.AREA_ALL;
             default -> AutoBreakMode.OFF;
         };
     }
@@ -355,7 +356,8 @@ public class ModConfig {
     public static enum AutoBreakMode {
         OFF,
         CLICK_WHITELIST,
-        AREA_WHITELIST;
+        AREA_WHITELIST,
+        AREA_ALL;
     }
 
     private static class PersistedConfig {

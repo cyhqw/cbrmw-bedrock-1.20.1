@@ -67,7 +67,7 @@ public enum AreaSelectionManager {
         if (mc.screen != null) {
             return;
         }
-        boolean bl = areaBedrockModeEnabled = ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_WHITELIST;
+        boolean bl = areaBedrockModeEnabled = ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_WHITELIST || ModConfig.getInstance().getAutoBreakMode() == ModConfig.AutoBreakMode.AREA_ALL;
         if (!INSTANCE.isBatchModeEnabled() && !areaBedrockModeEnabled) {
             return;
         }

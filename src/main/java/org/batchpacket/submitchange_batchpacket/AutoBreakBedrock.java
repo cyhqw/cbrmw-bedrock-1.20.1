@@ -112,7 +112,7 @@ public class AutoBreakBedrock {
         if (mc.level == null || mc.player == null) {
             return;
         }
-        if (ModConfig.getInstance().getAutoBreakMode() != ModConfig.AutoBreakMode.AREA_WHITELIST) {
+        if (!AutoBreakBedrock.isAreaMode()) {
             nearbyObservedNonPiston.clear();
             return;
         }
@@ -173,7 +173,7 @@ public class AutoBreakBedrock {
     }
 
     private static void probeGhostAirTransitionsNearSelection(Minecraft mc) {
-        if (ModConfig.getInstance().getAutoBreakMode() != ModConfig.AutoBreakMode.AREA_WHITELIST || mc.level == null || mc.player == null) {
+        if (!AutoBreakBedrock.isAreaMode() || mc.level == null || mc.player == null) {
             nearbyObservedNonAirAroundSelection.clear();
             return;
         }
@@ -403,7 +403,7 @@ public class AutoBreakBedrock {
         if (autoBreakMode == ModConfig.AutoBreakMode.OFF) {
             return false;
         }
-        if (autoBreakMode == ModConfig.AutoBreakMode.AREA_WHITELIST) {
+        if (autoBreakMode == ModConfig.AutoBreakMode.AREA_WHITELIST || autoBreakMode == ModConfig.AutoBreakMode.AREA_ALL) {
             return false;
         }
         if (!isPressed) {
@@ -443,7 +443,7 @@ public class AutoBreakBedrock {
     }
 
     private static void processAreaBedrockMode(Minecraft mc) {
-        if (ModConfig.getInstance().getAutoBreakMode() != ModConfig.AutoBreakMode.AREA_WHITELIST) {
+        if (!AutoBreakBedrock.isAreaMode()) {
             AutoBreakBedrock.clearAreaSelectionAndCaches(mc);
             return;
         }
@@ -461,7 +461,7 @@ public class AutoBreakBedrock {
             pendingAreaTargets.clear();
             areaSelectionCursor = 0;
             if (!areaModeSelectionHintShown) {
-                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8bf7\u5148\u7528\u4e2d\u952e\u6846\u9009\u533a\u57df");
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u8bf7\u5148\u7528\u4e2d\u952e\u6846\u9009\u533a\u57df (\u5f3a\u5236\u8981\u6c42)");
                 areaModeSelectionHintShown = true;
             }
             return;
@@ -469,7 +469,12 @@ public class AutoBreakBedrock {
         areaModeSelectionHintShown = false;
         if (!AutoBreakBedrock.selectionContainsBreakTargetsInSelection(mc, selectionManager)) {
             AutoBreakBedrock.clearAreaSelectionAndCaches(mc);
-            AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u767d\u540d\u5355\u65b9\u5757");
+            ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
+            if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u53ef\u7834\u65b9\u5757");
+            } else {
+                AutoBreakBedrock.showActionBarMessage((Player)mc.player, "\u6846\u9009\u8303\u56f4\u5185\u5df2\u65e0\u767d\u540d\u5355\u65b9\u5757");
+            }
             return;
         }
         AutoBreakBedrock.collectAreaTargetsToPending(mc, selectionManager);
@@ -604,7 +609,16 @@ public class AutoBreakBedrock {
         areaModeSelectionHintShown = false;
     }
 
+    private static boolean isAreaMode() {
+        ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
+        return mode == ModConfig.AutoBreakMode.AREA_WHITELIST || mode == ModConfig.AutoBreakMode.AREA_ALL;
+    }
+
     private static boolean isWhitelistedBreakTarget(BlockState targetState) {
+        ModConfig.AutoBreakMode mode = ModConfig.getInstance().getAutoBreakMode();
+        if (mode == ModConfig.AutoBreakMode.AREA_ALL) {
+            return targetState != null && !targetState.isAir();
+        }
         return targetState != null && !targetState.isAir() && ModConfig.getInstance().isWhitelistedAutoBreakBlock(targetState.getBlock());
     }
 
