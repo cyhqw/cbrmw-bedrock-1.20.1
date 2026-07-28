@@ -62,6 +62,7 @@ public class AutoBreakBedrock {
     private static final int TASK_STALL_RESET_TICKS = 5;
     private static final int MAX_PLACEMENT_OPERATIONS_PER_TICK = 1;
     private static final int MAX_RECYCLE_OPERATIONS_PER_TICK = 1;
+    private static final double PISTON_OPERATION_MARGIN = 2.0;
     private static boolean isLeftKeyPressed = false;
     private static final Map<BlockPos, BedrockCheckTask> bedrockTasks = new HashMap<BlockPos, BedrockCheckTask>();
     private static final Map<BlockPos, BedrockCheckTask> pistonReservations = new HashMap<BlockPos, BedrockCheckTask>();
@@ -249,8 +250,12 @@ public class AutoBreakBedrock {
                     BlockPos pos2 = playerPos.offset(dx, dy, dz);
                     if (pos2.getX() < minX || pos2.getX() > maxX || pos2.getY() < minY || pos2.getY() > maxY || pos2.getZ() < minZ || pos2.getZ() > maxZ) continue;
                     BlockState state = mc.level.getBlockState(pos2);
-                    if (!state.isAir()) {
+                    if (!state.isAir() && !AutoBreakBedrock.hasFluid(state)) {
                         nearbyObservedNonAirAroundSelection.add(pos2);
+                        continue;
+                    }
+                    if (AutoBreakBedrock.hasFluid(state)) {
+                        nearbyObservedNonAirAroundSelection.remove(pos2);
                         continue;
                     }
                     if (!nearbyObservedNonAirAroundSelection.remove(pos2)) continue;
@@ -470,10 +475,11 @@ public class AutoBreakBedrock {
     }
 
     private static boolean isWithinPlayerAreaWindow(Player player, BlockPos pos) {
-        BlockPos playerPos = player.blockPosition();
-        return Math.abs(pos.getX() - playerPos.getX()) <= TARGET_SCAN_HORIZONTAL_RADIUS
-            && Math.abs(pos.getY() - playerPos.getY()) <= TARGET_SCAN_VERTICAL_RADIUS
-            && Math.abs(pos.getZ() - playerPos.getZ()) <= TARGET_SCAN_HORIZONTAL_RADIUS;
+        double operationRange = Math.sqrt(RECYCLE_INTERACT_RANGE_SQR) - PISTON_OPERATION_MARGIN;
+        double dx = (double)pos.getX() + 0.5 - player.getX();
+        double dy = (double)pos.getY() + 0.5 - player.getY();
+        double dz = (double)pos.getZ() + 0.5 - player.getZ();
+        return dx * dx + dy * dy + dz * dz <= operationRange * operationRange;
     }
 
     private static int getProcessingSpeed() {
@@ -486,7 +492,8 @@ public class AutoBreakBedrock {
     }
 
     private static int getDynamicMaxActiveBreakTasks() {
-        return 1;
+        int speed = AutoBreakBedrock.getProcessingSpeed();
+        return Math.max(2, Math.min(8, 2 + speed / 20));
     }
 
     private static int getDynamicNewTasksPerAreaScan() {
@@ -509,7 +516,9 @@ public class AutoBreakBedrock {
             placementBudgetTick = globalTickCounter;
             placementOperationsThisTick = 0;
         }
-        if (placementOperationsThisTick >= MAX_PLACEMENT_OPERATIONS_PER_TICK) {
+        int maxOperations = Math.max(MAX_PLACEMENT_OPERATIONS_PER_TICK,
+            Math.min(8, 1 + AutoBreakBedrock.getProcessingSpeed() / 15));
+        if (placementOperationsThisTick >= maxOperations) {
             return false;
         }
         ++placementOperationsThisTick;
@@ -521,7 +530,9 @@ public class AutoBreakBedrock {
             recycleBudgetTick = globalTickCounter;
             recycleOperationsThisTick = 0;
         }
-        if (recycleOperationsThisTick >= MAX_RECYCLE_OPERATIONS_PER_TICK) {
+        int maxOperations = Math.max(MAX_RECYCLE_OPERATIONS_PER_TICK,
+            Math.min(8, 1 + AutoBreakBedrock.getProcessingSpeed() / 15));
+        if (recycleOperationsThisTick >= maxOperations) {
             return false;
         }
         ++recycleOperationsThisTick;
@@ -761,7 +772,7 @@ public class AutoBreakBedrock {
     }
 
     private static boolean isWhitelistedBreakTarget(BlockState targetState) {
-        if (targetState == null || targetState.isAir()) {
+        if (targetState == null || targetState.isAir() || AutoBreakBedrock.hasFluid(targetState)) {
             return false;
         }
         if (targetState.getBlock() == Blocks.PISTON || targetState.getBlock() == Blocks.STICKY_PISTON) {
@@ -774,13 +785,22 @@ public class AutoBreakBedrock {
         return ModConfig.getInstance().isWhitelistedAutoBreakBlock(targetState.getBlock());
     }
 
+    private static boolean hasFluid(BlockState state) {
+        return state != null && !state.getFluidState().isEmpty();
+    }
+
+    private static boolean isPistonPlacementSpace(BlockState state) {
+        return state != null && !AutoBreakBedrock.hasFluid(state)
+            && (state.isAir() || state.canBeReplaced());
+    }
+
     private static boolean isSurfaceExposed(Minecraft mc, BlockPos pos) {
         if (mc.level == null) {
             return false;
         }
         for (Direction dir : Direction.values()) {
             BlockState neighborState = mc.level.getBlockState(pos.relative(dir));
-            if (neighborState.isAir() || neighborState.canBeReplaced()) {
+            if (neighborState.isAir() || AutoBreakBedrock.isPistonPlacementSpace(neighborState)) {
                 return true;
             }
         }
@@ -807,7 +827,7 @@ public class AutoBreakBedrock {
             return false;
         }
         BlockState state = mc.level.getBlockState(pos);
-        if (!state.isAir() && !state.canBeReplaced()) {
+        if (!AutoBreakBedrock.isPistonPlacementSpace(state)) {
             return false;
         }
         pistonReservations.put(pos, task);
@@ -831,12 +851,12 @@ public class AutoBreakBedrock {
         for (Direction dir : Direction.values()) {
             BlockPos pistonAPos = targetPos.relative(dir);
             BlockState pistonAState = mc.level.getBlockState(pistonAPos);
-            if (!pistonAState.isAir() && !pistonAState.canBeReplaced()) continue;
+            if (!AutoBreakBedrock.isPistonPlacementSpace(pistonAState)) continue;
             ArrayList<BlockPos> bList = new ArrayList<BlockPos>();
             for (Direction bDir : Direction.values()) {
                 BlockState bState;
                 BlockPos bPos = pistonAPos.relative(bDir);
-                if (bPos.equals((Object)targetPos) || !(bState = mc.level.getBlockState(bPos)).isAir() && !bState.canBeReplaced()) continue;
+                if (bPos.equals((Object)targetPos) || !AutoBreakBedrock.isPistonPlacementSpace(bState = mc.level.getBlockState(bPos))) continue;
                 bList.add(bPos);
             }
             if (bList.isEmpty()) continue;
